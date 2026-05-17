@@ -394,7 +394,6 @@ export default function InputBar() {
       return
     }
     
-    showToast(`开始下载 ${imageIds.length} 张图片...`, 'info')
     let successCount = 0
     let failCount = 0
     
@@ -429,10 +428,12 @@ export default function InputBar() {
       }
     }
     
-    if (failCount > 0) {
-      showToast(`下载完成: 成功 ${successCount}，失败 ${failCount}`, 'info')
+    if (successCount === 0) {
+      showToast('下载失败', 'error')
+    } else if (failCount > 0) {
+      showToast(`部分下载失败：成功 ${successCount}，失败 ${failCount}`, 'error')
     } else {
-      showToast(`成功下载 ${successCount} 张图片`, 'success')
+      showToast(successCount > 1 ? `下载成功：${successCount} 张图片` : '下载成功', 'success')
     }
     clearSelection()
   }, [tasks, selectedTaskIds, showToast, clearSelection])
@@ -466,6 +467,7 @@ export default function InputBar() {
   const [touchDragPreview, setTouchDragPreview] = useState<{ src: string; x: number; y: number } | null>(null)
   const handleRef = useRef<HTMLDivElement>(null)
   const dragTouchRef = useRef({ startY: 0, moved: false })
+  const suppressHandleClickUntilRef = useRef(0)
   const imageDragIndexRef = useRef<number | null>(null)
   const imageTouchDragRef = useRef({ index: null as number | null, startX: 0, startY: 0, moved: false })
   const imageDragOverIndexRef = useRef<number | null>(null)
@@ -1294,8 +1296,8 @@ export default function InputBar() {
       if (dy < -30) setMobileCollapsed(false)
     }
     const onTouchEnd = () => {
-      if (!dragTouchRef.current.moved) {
-        setMobileCollapsed((v) => !v)
+      if (dragTouchRef.current.moved) {
+        suppressHandleClickUntilRef.current = Date.now() + 500
       }
     }
     el.addEventListener('touchstart', onTouchStart, { passive: true })
@@ -1929,7 +1931,13 @@ export default function InputBar() {
           <div
             ref={handleRef}
             className="sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none"
-            onClick={() => setMobileCollapsed((v) => !v)}
+            onClick={() => {
+              if (Date.now() < suppressHandleClickUntilRef.current) {
+                suppressHandleClickUntilRef.current = 0
+                return
+              }
+              setMobileCollapsed((v) => !v)
+            }}
           >
             <div className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`} />
           </div>

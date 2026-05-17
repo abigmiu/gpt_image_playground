@@ -16,11 +16,13 @@ import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
+import { useGlobalClickSuppression } from './lib/clickSuppression'
 
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
   const appMode = useStore((s) => s.appMode)
   useDockerApiUrlMigrationNotice()
+  useGlobalClickSuppression()
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)

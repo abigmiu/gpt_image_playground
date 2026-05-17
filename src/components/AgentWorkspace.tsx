@@ -739,7 +739,6 @@ export default function AgentWorkspace() {
                             <AgentActionButton tooltip="下载所有图片" className={`p-1.5 rounded-md transition-colors ${getRoundTasks(round ?? null, tasks).filter(Boolean).length > 0 ? 'text-gray-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10' : 'text-gray-300 dark:text-gray-600 opacity-50 cursor-not-allowed'}`} disabled={getRoundTasks(round ?? null, tasks).filter(Boolean).length === 0} onClick={async () => {
                               const imageIds = tasksForRound.flatMap(t => t.outputImages || []);
                               if (imageIds.length === 0) return;
-                              useStore.getState().showToast(`开始下载 ${imageIds.length} 张图片...`, 'info');
                               let successCount = 0;
                               let failCount = 0;
                               for (const id of imageIds) {
@@ -764,8 +763,9 @@ export default function AgentWorkspace() {
                                   failCount++;
                                 }
                               }
-                              if (failCount > 0) useStore.getState().showToast(`下载完成: 成功 ${successCount}，失败 ${failCount}`, 'info');
-                              else useStore.getState().showToast(`成功下载 ${successCount} 张图片`, 'success');
+                              if (successCount === 0) useStore.getState().showToast('下载失败', 'error');
+                              else if (failCount > 0) useStore.getState().showToast(`部分下载失败：成功 ${successCount}，失败 ${failCount}`, 'error');
+                              else useStore.getState().showToast(successCount > 1 ? `下载成功：${successCount} 张图片` : '下载成功', 'success');
                             }}>
                               <DownloadIcon className="w-4 h-4" />
                             </AgentActionButton>

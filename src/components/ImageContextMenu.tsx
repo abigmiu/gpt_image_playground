@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import { useStore, addImageFromUrl, ensureImageCached } from '../store'
 import { copyBlobToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
 import { downloadImageIds } from '../lib/downloadImages'
+import { suppressGlobalClicks } from '../lib/clickSuppression'
 import { CopyIcon, DownloadIcon, EditIcon } from './icons'
 
 export default function ImageContextMenu() {
@@ -56,6 +57,7 @@ export default function ImageContextMenu() {
       if (e.target instanceof Element && e.target.closest('[data-lightbox-root]')) {
         window.dispatchEvent(new Event('image-context-menu-dismiss-lightbox-click'))
       }
+      if (e.type === 'mousedown' || e.type === 'touchstart') suppressGlobalClicks()
       setMenuInfo(null)
     }
     window.addEventListener('mousedown', close, { capture: true })
@@ -110,7 +112,7 @@ export default function ImageContextMenu() {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      showToast('开始下载', 'success')
+      showToast('下载成功', 'success')
     } catch (err) {
       console.error(err)
       showToast('下载失败', 'error')
@@ -124,14 +126,13 @@ export default function ImageContextMenu() {
     if (outputImageIds.length === 0) return
 
     try {
-      showToast(outputImageIds.length > 1 ? `开始下载 ${outputImageIds.length} 张图片...` : '开始下载', 'info')
       const result = await downloadImageIds(outputImageIds, 'outputs')
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
       } else if (result.failCount > 0) {
-        showToast(`下载完成：成功 ${result.successCount}，失败 ${result.failCount}`, 'info')
+        showToast(`部分下载失败：成功 ${result.successCount}，失败 ${result.failCount}`, 'error')
       } else {
-        showToast(outputImageIds.length > 1 ? `已开始下载 ${result.successCount} 张图片` : '开始下载', 'success')
+        showToast(result.successCount > 1 ? `下载成功：${result.successCount} 张图片` : '下载成功', 'success')
       }
     } catch (err) {
       console.error(err)

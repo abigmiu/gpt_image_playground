@@ -3,6 +3,7 @@ import { useStore, getCachedImage, ensureImageCached } from '../store'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
+import { suppressGlobalClicks } from '../lib/clickSuppression'
 
 const MIN_SCALE = 1
 const MAX_SCALE = 10
@@ -536,6 +537,8 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
         // 单击关闭：仅点击图片和控件外立即关闭；图片上的单击保留给双击缩放。
         if (!touchStartedOnImageRef.current && !touchStartedOnControlRef.current) {
           cancelCloseTap()
+          suppressGlobalClicks()
+          if (e.cancelable) e.preventDefault()
           onClose()
         }
         resetTouchGesture()

@@ -283,10 +283,11 @@ export default function DetailModal() {
     if (!currentOutputImageId) return
 
     try {
-      showToast('开始下载...', 'info')
       const result = await downloadImageIds([currentOutputImageId], `image-${Date.now()}`)
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
+      } else {
+        showToast('下载成功', 'success')
       }
     } catch (err) {
       console.error(err)
@@ -299,14 +300,13 @@ export default function DetailModal() {
     if (!task.outputImages?.length) return
 
     try {
-      showToast(task.outputImages.length > 1 ? `开始下载 ${task.outputImages.length} 张图片...` : '开始下载', 'info')
       const result = await downloadImageIds(task.outputImages, `task-${task.id}-outputs`)
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
       } else if (result.failCount > 0) {
-        showToast(`下载完成：成功 ${result.successCount}，失败 ${result.failCount}`, 'info')
+        showToast(`部分下载失败：成功 ${result.successCount}，失败 ${result.failCount}`, 'error')
       } else {
-        showToast(task.outputImages.length > 1 ? `已开始下载 ${result.successCount} 张图片` : '开始下载', 'success')
+        showToast(result.successCount > 1 ? `下载成功：${result.successCount} 张图片` : '下载成功', 'success')
       }
     } catch (err) {
       console.error(err)
@@ -318,14 +318,13 @@ export default function DetailModal() {
     if (!streamPartialImageIds.length) return
 
     try {
-      showToast(`开始下载 ${streamPartialImageIds.length} 张中间步骤图...`, 'info')
       const result = await downloadImageIds(streamPartialImageIds, `task-${task.id}-partials`)
       if (result.successCount === 0) {
         showToast('下载失败', 'error')
       } else if (result.failCount > 0) {
-        showToast(`下载完成：成功 ${result.successCount}，失败 ${result.failCount}`, 'info')
+        showToast(`部分下载失败：成功 ${result.successCount}，失败 ${result.failCount}`, 'error')
       } else {
-        showToast(`已开始下载 ${result.successCount} 张中间步骤图`, 'success')
+        showToast(`下载成功：${result.successCount} 张中间步骤图`, 'success')
       }
     } catch (err) {
       console.error(err)
