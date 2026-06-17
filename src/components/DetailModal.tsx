@@ -237,7 +237,12 @@ export default function DetailModal() {
   const outputLen = outputSlots.length
   const currentImageRatio = currentOutputImageId ? imageRatios[currentOutputImageId] : ''
   const currentImageSize = currentOutputImageId ? imageSizes[currentOutputImageId] : ''
-  const currentActualParams = currentOutputImageId ? task.actualParamsByImage?.[currentOutputImageId] : undefined
+  const baseActualParams = currentOutputImageId
+    ? task.actualParamsByImage?.[currentOutputImageId] ?? task.actualParams
+    : task.actualParams
+  const currentActualParams = (baseActualParams?.size || !currentImageSize)
+    ? baseActualParams
+    : { ...(baseActualParams ?? {}), size: currentImageSize.replace('×', 'x') }
   const currentRevisedPrompt = currentOutputImageId ? task.revisedPromptByImage?.[currentOutputImageId]?.trim() : ''
   // 将 @图N 等 mention 标记和透明背景追加提示词都按实际请求内容比较，
   // 避免仅由本地请求预处理导致的不一致被当作“API 改写”。
