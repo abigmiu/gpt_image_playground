@@ -178,7 +178,7 @@ export default function GeneralSettingsTab({
           </button>
         </div>
         <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-          开启后，Codex CLI 兼容模式下的 Image API 请求和所有 Responses API 请求都不再附加防改写提示词，允许模型按服务商策略优化提示词。
+          开启后，Codex CLI 兼容模式下的图像请求和 Sub to API 对话请求都不再附加防改写提示词，允许模型按服务商策略优化提示词。
         </div>
       </div>
       <div className="block">

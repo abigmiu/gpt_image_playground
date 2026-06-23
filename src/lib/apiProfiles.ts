@@ -23,10 +23,9 @@ const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1'
 const RAW_DEFAULT_API_URL = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL)
 const DEFAULT_OPENAI_API_PROXY = readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE) === 'true'
 const DOCKER_DEPLOYMENT = readRuntimeEnv(import.meta.env.VITE_DOCKER_DEPLOYMENT) === 'true'
-const SHOW_DEFAULT_CONFIG_ONLY = readRuntimeEnv(import.meta.env.VITE_SHOW_DEFAULT_CONFIG_ONLY) === 'true'
 const DEFAULT_BASE_URL = isImportableConfigUrl(RAW_DEFAULT_API_URL)
   ? ''
-  : RAW_DEFAULT_API_URL || (DOCKER_DEPLOYMENT && DEFAULT_OPENAI_API_PROXY ? '' : OPENAI_DEFAULT_BASE_URL)
+  : RAW_DEFAULT_API_URL || (DOCKER_DEPLOYMENT && DEFAULT_OPENAI_API_PROXY ? '' : '/api/v1/playground/v1')
 export const DEFAULT_IMAGES_MODEL = 'gpt-image-2'
 export const DEFAULT_RESPONSES_MODEL = 'gpt-5.5'
 export const DEFAULT_FAL_BASE_URL = 'https://fal.run'
@@ -78,10 +77,6 @@ export function normalizeAgentMaxToolRounds(value: unknown, fallback: number | u
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return fallbackValue
   return Math.min(50, Math.max(1, Math.trunc(numeric)))
-}
-
-export function isDefaultConfigOnlyEnabled(): boolean {
-  return SHOW_DEFAULT_CONFIG_ONLY && (Boolean(RAW_DEFAULT_API_URL) || DEFAULT_OPENAI_API_PROXY)
 }
 
 function normalizeReferenceImageEditAction(value: unknown): ReferenceImageEditAction {
@@ -319,7 +314,7 @@ export function normalizeCustomProviderDefinitions(input: unknown): CustomProvid
 }
 
 export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
-  const apiMode = overrides.apiMode ?? 'images'
+  const apiMode = overrides.apiMode ?? 'responses'
   const streamImages = overrides.streamImages ?? getDefaultStreamImages('openai', apiMode)
 
   return {
@@ -328,7 +323,7 @@ export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}):
     provider: 'openai',
     baseUrl: DEFAULT_BASE_URL,
     apiKey: '',
-    model: DEFAULT_IMAGES_MODEL,
+    model: apiMode === 'responses' ? DEFAULT_RESPONSES_MODEL : DEFAULT_IMAGES_MODEL,
     timeout: DEFAULT_API_TIMEOUT,
     codexCli: false,
     apiProxy: DEFAULT_OPENAI_API_PROXY,
@@ -465,7 +460,7 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
   const rawProvider = typeof record.provider === 'string' ? record.provider : ''
   const provider: ApiProvider = rawProvider === 'fal' || customProviderIds.has(rawProvider) ? rawProvider : 'openai'
-  const apiMode: ApiMode = provider === 'openai' && record.apiMode === 'responses' ? 'responses' : 'images'
+  const apiMode: ApiMode = provider === 'openai' ? 'responses' : 'images'
   const defaults = provider === 'fal'
     ? createDefaultFalProfile(fallback)
     : createDefaultOpenAIProfile({ ...fallback, apiMode })
@@ -510,11 +505,11 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
   const customProviders = normalizeCustomProviderDefinitions(record.customProviders)
   const customProviderIds = new Set(customProviders.map((provider) => provider.id))
-  const legacyApiMode: ApiMode = record.apiMode === 'responses' ? 'responses' : 'images'
+  const legacyApiMode: ApiMode = 'responses'
   const legacyProfile = createDefaultOpenAIProfile({
     baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : DEFAULT_BASE_URL,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_IMAGES_MODEL,
+    model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_RESPONSES_MODEL,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : DEFAULT_API_TIMEOUT,
     apiMode: legacyApiMode,
     codexCli: Boolean(record.codexCli),
@@ -683,9 +678,7 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
 
 export function validateApiProfile(profile: ApiProfile): string | null {
   if (!profile.name.trim()) return '缺少名称'
-  if (profile.provider !== 'fal' && !profile.baseUrl.trim() && !shouldUseApiProxy(profile.apiProxy)) return '缺少 API URL'
-  if (!profile.apiKey.trim()) return '缺少 API Key'
-  if (!profile.model.trim()) return '缺少模型 ID'
+  if (profile.provider !== 'fal' && !profile.baseUrl.trim() && !shouldUseApiProxy(profile.apiProxy)) return '缺少请求地址'
   return null
 }
 

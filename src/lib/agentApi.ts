@@ -1,6 +1,7 @@
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type AppSettings, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { appendStreamingFormatHint, maybeAppendStreamingHint, getApiErrorMessage, MIME_MAP, normalizeBase64Image, pickActualParams } from './imageApiShared'
+import { fetchWithSub2ApiAuth } from './sub2apiAuth'
 
 export interface AgentApiResultImage {
   toolCallId?: string
@@ -95,7 +96,6 @@ const AGENT_TITLE_MAX_LENGTH = 28
 
 function createHeaders(profile: ApiProfile): Record<string, string> {
   return {
-    Authorization: `Bearer ${profile.apiKey}`,
     'Content-Type': 'application/json',
   }
 }
@@ -713,7 +713,6 @@ export async function callAgentResponsesApi(opts: {
 
   try {
     const body: Record<string, unknown> = {
-      model: profile.model || settings.model,
       instructions: createAgentInstructions(settings),
       input,
       tools: createAgentTools(params, profile, settings, maskDataUrl),
@@ -722,7 +721,7 @@ export async function callAgentResponsesApi(opts: {
       body.stream = true
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
+    const response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
       headers: createHeaders(profile),
       cache: 'no-store',
@@ -778,12 +777,11 @@ export async function callAgentConversationTitleApi(opts: {
       content.push({ type: 'input_image', image_url: dataUrl })
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
+    const response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
       headers: createHeaders(profile),
       cache: 'no-store',
       body: JSON.stringify({
-        model: profile.model || settings.model,
         instructions: AGENT_TITLE_INSTRUCTIONS,
         input: [{ role: 'user', content }],
         max_output_tokens: 32,
@@ -884,7 +882,6 @@ export async function callBatchImageSingle(opts: {
     }
 
     const body: Record<string, unknown> = {
-      model: profile.model,
       input,
       tools: [tool],
       tool_choice: 'required',
@@ -893,7 +890,7 @@ export async function callBatchImageSingle(opts: {
       body.stream = true
     }
 
-    const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
+    const response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
       method: 'POST',
       headers: createHeaders(profile),
       cache: 'no-store',

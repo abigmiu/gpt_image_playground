@@ -6,6 +6,7 @@ import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import HistoryModal from './HistoryModal'
+import Sub2ApiAuthModal from './Sub2ApiAuthModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
 import { EditIcon, HelpCircleIcon, HistoryIcon, InstallIcon, SettingsIcon } from './icons'
 
@@ -39,6 +40,7 @@ export default function Header() {
   const [hintVisible, setHintVisible] = useState(false)
   const [scrollDirection, setScrollDirection] = useState<'up' | 'down'>('up')
   const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [showAuthModal, setShowAuthModal] = useState(false)
   const historyButtonRef = useRef<HTMLButtonElement>(null)
   const createConversation = useStore((s) => s.createAgentConversation)
 
@@ -290,12 +292,25 @@ export default function Header() {
                 操作指南
               </ViewportTooltip>
             </div>
+            <button
+              onClick={() => {
+                dismissAllTooltips()
+                setShowAuthModal(true)
+              }}
+              className="px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors text-sm text-gray-600 dark:text-gray-400"
+              aria-label="登录"
+            >
+              登录
+            </button>
             <div
               className="relative"
               {...settingsTooltip.handlers}
             >
               <button
-                onClick={() => setShowSettings(true)}
+                onClick={() => {
+                  dismissAllTooltips()
+                  setShowSettings(true)
+                }}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
                 aria-label="设置"
               >
@@ -326,13 +341,15 @@ export default function Header() {
           </div>
         </div>
       </header>
-      
+
       {/* Hint for sliding down */}
       <div className={`fixed top-0 left-0 right-0 z-30 flex justify-center pointer-events-none transition-all duration-300 ease-in-out sm:hidden ${appMode === 'agent' && hintVisible && !agentMobileHeaderVisible ? 'translate-y-[env(safe-area-inset-top,0px)] opacity-100' : '-translate-y-full opacity-0'}`}>
         <div className="bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-b-xl shadow-lg">
           下拉展示顶栏
         </div>
       </div>
+
+      {showAuthModal ? <Sub2ApiAuthModal onClose={() => setShowAuthModal(false)} /> : null}
 
       <div className={`safe-area-top invisible pointer-events-none transition-all duration-300 ease-in-out ${appMode === 'agent' && !agentMobileHeaderVisible ? 'max-h-0 sm:max-h-[500px] opacity-0 sm:opacity-100 overflow-hidden sm:overflow-visible' : 'max-h-[500px] opacity-100'}`} aria-hidden="true">
         <div className="safe-header-inner" />

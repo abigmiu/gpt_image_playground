@@ -41,7 +41,7 @@ export default function AgentSettingsTab({
     <div className="space-y-4">
       <div className="block">
         <div className="mb-1 flex items-center justify-between gap-3">
-          <span className="block text-sm text-gray-600 dark:text-gray-300">使用独立的 API 配置</span>
+          <span className="block text-sm text-gray-600 dark:text-gray-300">Agent 调用方式</span>
           <div className="w-20 shrink-0">
             <Select
               value={draft.agentApiConfigMode}
@@ -56,8 +56,8 @@ export default function AgentSettingsTab({
           </div>
         </div>
         <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500 space-y-1">
-          <div>原生：使用原生的 Responses API 配置，由模型调用 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">image_generation</code> 工具生成图片。</div>
-          <div>混合：使用非原生的混合 API 配置，由文本模型调用自定义工具，请求图像模型生成图像，解决部分服务商/模型不支持 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">image_generation</code> 工具的问题。</div>
+          <div>原生：默认走 Sub to API 的 Responses 能力，由模型直接调用 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">image_generation</code> 工具生成图片。</div>
+          <div>混合：由文本模型调用自定义工具，再请求图像生成通道，适用于需要拆分调用的情况。</div>
         </div>
       </div>
 
@@ -82,7 +82,7 @@ export default function AgentSettingsTab({
               </div>
             </div>
             <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-              用于对话和调用工具，仅支持 Responses API 配置。
+              默认使用 Sub to API 的 Responses 通道进行对话和工具调用。
             </div>
           </div>
 
@@ -142,7 +142,7 @@ export default function AgentSettingsTab({
           </button>
         </div>
         <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-          启用 Responses API 的 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">web_search</code> 工具。模型每次调用此工具会产生少量固定价格的额外计费。
+          启用 Sub to API 提供的 <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[10px] dark:bg-white/[0.06]">web_search</code> 工具。模型每次调用此工具会产生少量固定价格的额外计费。
         </div>
       </div>
     </div>

@@ -13,6 +13,7 @@ const DEFAULT_PROXY_PREFIX = '/api-proxy'
 export function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim()
   if (!trimmed) return ''
+  if (trimmed.startsWith('/')) return trimmed.replace(/\/+$/, '')
 
   const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
     ? trimmed
@@ -70,6 +71,12 @@ export function buildApiUrl(
   const apiPath = normalizedBaseUrl.endsWith('/v1')
     ? endpointPath
     : ['v1', endpointPath].join('/')
+
+  if (normalizedBaseUrl.startsWith('/')) {
+    return normalizedBaseUrl.endsWith('/v1')
+      ? `${normalizedBaseUrl}/${endpointPath}`
+      : `${normalizedBaseUrl}/${apiPath}`
+  }
 
   return normalizedBaseUrl ? `${normalizedBaseUrl}/${apiPath}` : `/${apiPath}`
 }

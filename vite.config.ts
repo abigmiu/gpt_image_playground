@@ -19,6 +19,7 @@ function loadDevProxyConfig() {
 
 export default defineConfig(({ command }) => {
   const devProxyConfig = command === 'serve' ? loadDevProxyConfig() : null
+  const authProxyTarget = devProxyConfig?.target.replace(/\/v1\/?$/, '') ?? null
 
   return {
     plugins: [react()],
@@ -28,22 +29,27 @@ export default defineConfig(({ command }) => {
       __DEV_PROXY_CONFIG__: JSON.stringify(devProxyConfig),
     },
     server: {
+      port: 5811,
       host: true,
-      proxy:
-        devProxyConfig?.enabled
-          ? {
-              [devProxyConfig.prefix]: {
-                target: devProxyConfig.target,
-                changeOrigin: devProxyConfig.changeOrigin,
-                secure: devProxyConfig.secure,
-                rewrite: (path) =>
-                  path.replace(
-                    new RegExp(`^${devProxyConfig.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
-                    '',
-                  ),
-              },
-            }
-          : undefined,
+      proxy: devProxyConfig
+        ? {
+            [devProxyConfig.prefix]: {
+              target: devProxyConfig.target,
+              changeOrigin: devProxyConfig.changeOrigin,
+              secure: devProxyConfig.secure,
+              rewrite: (path) =>
+                path.replace(
+                  new RegExp(`^${devProxyConfig.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+                  '',
+                ),
+            },
+            '/api/v1': {
+              target: authProxyTarget ?? devProxyConfig.target,
+              changeOrigin: devProxyConfig.changeOrigin,
+              secure: devProxyConfig.secure,
+            },
+          }
+        : undefined,
     },
   }
 })

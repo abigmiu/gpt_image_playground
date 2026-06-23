@@ -1186,19 +1186,6 @@ export const useStore = create<AppState>()(
           return
         }
 
-        if (settings.agentApiConfigMode === 'off' && activeProfile.provider === 'openai' && activeProfile.apiMode !== 'responses') {
-          state.setConfirmDialog({
-            title: '需要 Responses API 配置',
-            message: `当前配置「${activeProfile.name}」使用的是 Images API，仅支持生成图片，无 Agent 模式需要的对话能力。\n\n请前往 API 配置页，将当前配置调整为 Responses API，或切换/新建一个支持 Responses API 的配置。`,
-            confirmText: '去设置',
-            cancelText: '取消',
-            action: () => {
-              useStore.getState().setShowSettings(true, 'api')
-            },
-          })
-          return
-        }
-
         if (settings.agentApiConfigMode !== 'off') {
           state.setConfirmDialog({
             title: 'Agent API 配置不完整',
@@ -1214,11 +1201,11 @@ export const useStore = create<AppState>()(
 
         state.setConfirmDialog({
           title: '配置不支持 Agent 模式',
-          message: `当前配置「${activeProfile.name}」所属的服务商暂不支持 Agent 模式。Agent 模式需要使用支持 Responses API 的 OpenAI 配置。\n\n请前往 API 配置页，切换或新建一个支持 Responses API 的配置。`,
+          message: `当前配置「${activeProfile.name}」暂不支持 Agent 模式。\n\n请前往 Agent 配置页调整调用方式。`,
           confirmText: '去设置',
           cancelText: '取消',
           action: () => {
-            useStore.getState().setShowSettings(true, 'api')
+            useStore.getState().setShowSettings(true, 'agent')
           },
         })
       },
@@ -1856,8 +1843,8 @@ function createSettingsForApiProfile(settings: AppSettings, profile: ApiProfile)
 function getAgentProfileValidationError(settings: AppSettings): { profile: ApiProfile | null; message: string } | null {
   const normalized = normalizeSettings(settings)
   const textProfile = getAgentTextApiProfile(normalized)
-  if (!textProfile || textProfile.provider !== 'openai' || textProfile.apiMode !== 'responses') {
-    return { profile: textProfile, message: 'Agent 模式需要使用支持 Responses API 的 OpenAI 兼容文本模型配置。' }
+  if (!textProfile || textProfile.provider !== 'openai') {
+    return { profile: textProfile, message: 'Agent 模式当前仅支持 OpenAI 兼容通道。' }
   }
   const textProfileError = validateApiProfile(textProfile)
   if (textProfileError) return { profile: textProfile, message: `文本模型 API 配置不完整：${textProfileError}` }
@@ -3235,7 +3222,7 @@ export async function submitAgentMessage() {
   const agentValidationError = getAgentProfileValidationError(normalizedSettings)
   if (agentValidationError) {
     showToast(`请先完善 Agent API 配置：${agentValidationError.message}`, 'error')
-    state.setShowSettings(true, normalizedSettings.agentApiConfigMode === 'off' ? 'api' : 'agent')
+    state.setShowSettings(true, 'agent')
     return
   }
 
@@ -3384,7 +3371,7 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
   const agentValidationError = getAgentProfileValidationError(normalizedSettings)
   if (agentValidationError) {
     showToast(`请先完善 Agent API 配置：${agentValidationError.message}`, 'error')
-    state.setShowSettings(true, normalizedSettings.agentApiConfigMode === 'off' ? 'api' : 'agent')
+    state.setShowSettings(true, 'agent')
     return
   }
 
@@ -5225,4 +5212,3 @@ export async function addImageFromUrl(src: string): Promise<void> {
   cacheImage(id, dataUrl)
   useStore.getState().addInputImage({ id, dataUrl })
 }
-
