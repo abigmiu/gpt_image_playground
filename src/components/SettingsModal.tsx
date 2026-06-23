@@ -35,7 +35,6 @@ import { Checkbox } from './Checkbox'
 import ViewportTooltip from './ViewportTooltip'
 import { ChevronDownIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon, GithubIcon, ExportIcon, ImportIcon, DragHandleIcon, LinkIcon } from './icons'
 import GeneralSettingsTab from './settings/GeneralSettingsTab'
-import AgentSettingsTab from './settings/AgentSettingsTab'
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -458,7 +457,7 @@ export default function SettingsModal() {
 
   useEffect(() => {
     if (!showSettings || !settingsTabRequest) return
-    setActiveTab(settingsTabRequest === 'api' ? 'general' : settingsTabRequest)
+    setActiveTab(settingsTabRequest === 'data' || settingsTabRequest === 'about' ? settingsTabRequest : 'general')
   }, [settingsTabRequest, showSettings])
 
   const updateProfileMenuMaxHeight = useCallback(() => {
@@ -1169,17 +1168,6 @@ export default function SettingsModal() {
                 习惯配置
               </button>
               <button
-                onClick={() => setActiveTab('agent')}
-                className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'agent' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8V4H8" />
-                  <rect width="16" height="12" x="4" y="8" rx="2" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2 14h2M20 14h2M15 13v2M9 13v2" />
-                </svg>
-                Agent 配置
-              </button>
-              <button
                 onClick={() => setActiveTab('data')}
                 className={`whitespace-nowrap flex-shrink-0 flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-xl transition-colors ${activeTab === 'data' ? 'bg-white dark:bg-white/[0.08] shadow-sm text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/[0.04]'}`}
               >
@@ -1213,20 +1201,6 @@ export default function SettingsModal() {
               />
             )}
 
-            {activeTab === 'agent' && (
-              <AgentSettingsTab
-                draft={draft}
-                agentMaxToolRoundsInput={agentMaxToolRoundsInput}
-                agentTextProfileOptions={agentTextProfileOptions}
-                agentImageProfileOptions={agentImageProfileOptions}
-                selectedAgentTextProfile={selectedAgentTextProfile}
-                selectedAgentImageProfile={selectedAgentImageProfile}
-                setAgentMaxToolRoundsInput={setAgentMaxToolRoundsInput}
-                updateAgentApiConfigMode={updateAgentApiConfigMode}
-                commitSettings={commitSettings}
-                commitAgentMaxToolRounds={commitAgentMaxToolRounds}
-              />
-            )}
             {activeTab === 'data' && (
               <div className="space-y-4">
                 <div className="rounded-2xl bg-gray-50/80 p-4 border border-gray-200/60 dark:bg-white/[0.02] dark:border-white/[0.05] flex items-start gap-3">

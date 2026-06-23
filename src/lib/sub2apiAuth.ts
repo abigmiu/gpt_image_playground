@@ -12,6 +12,14 @@ export interface Sub2ApiPublicSettings {
   turnstile_site_key: string
 }
 
+export interface Sub2ApiCurrentUser {
+  id?: number
+  email?: string
+  username?: string
+  nickname?: string
+  display_name?: string
+}
+
 interface Sub2ApiEnvelope<T> {
   code: number
   message: string
@@ -37,6 +45,7 @@ interface RefreshTokenResponse {
 const STORAGE_KEY = 'sub2api-auth-session'
 const AUTH_CHANGE_EVENT = 'sub2api-auth-change'
 const AUTH_API_PREFIX = '/api/v1'
+const PLAYGROUND_API_PREFIX = '/api/v1/playground'
 
 let refreshPromise: Promise<Sub2ApiAuthSession | null> | null = null
 
@@ -180,11 +189,20 @@ export async function getSub2ApiCurrentUser() {
   const response = await fetchWithSub2ApiAuth(buildAuthUrl('auth/me'), {
     cache: 'no-store',
   })
-  const payload = await parseJsonResponse<Record<string, unknown>>(response)
+  const payload = await parseJsonResponse<Sub2ApiCurrentUser>(response)
   if (!response.ok || payload.code !== 0 || !payload.data) {
     throw new Error(parseEnvelopeMessage(payload))
   }
   return payload.data
+}
+
+export function getSub2ApiUserDisplayName(user: Sub2ApiCurrentUser | null | undefined): string {
+  if (!user) return ''
+  const candidates = [user.display_name, user.nickname, user.username, user.email]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+  }
+  return ''
 }
 
 export async function loginSub2Api(input: {
@@ -301,4 +319,21 @@ export async function logoutSub2Api() {
   } finally {
     clearSub2ApiAuthSession()
   }
+}
+
+export function resolveSub2ApiPlaygroundBaseUrl(baseUrl: string): string {
+  if (!getSub2ApiAuthSession()?.accessToken) return baseUrl
+
+  const trimmed = baseUrl.trim()
+  if (!trimmed) return PLAYGROUND_API_PREFIX
+  if (trimmed.startsWith('/')) return PLAYGROUND_API_PREFIX
+
+  try {
+    const url = new URL(trimmed)
+    if (url.origin === window.location.origin) return PLAYGROUND_API_PREFIX
+  } catch {
+    return PLAYGROUND_API_PREFIX
+  }
+
+  return baseUrl
 }

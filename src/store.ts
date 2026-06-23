@@ -721,7 +721,7 @@ function mergePersistedState(persistedState: unknown, currentState: AppState): A
     typeof persisted.activeAgentConversationId === 'string' && (!hasPersistedAgentConversations || agentConversations.some((conversation) => conversation.id === persisted.activeAgentConversationId))
       ? persisted.activeAgentConversationId
       : agentConversations[0]?.id ?? null
-  const appMode = persisted.appMode === 'agent' ? 'agent' : 'gallery'
+  const appMode: AppMode = 'gallery'
   const galleryInputDraft = settings.persistInputOnRestart
     ? normalizeAgentInputDraft(persisted.galleryInputDraft ?? {
         prompt: persisted.prompt,
@@ -734,20 +734,6 @@ function mergePersistedState(persistedState: unknown, currentState: AppState): A
     ? normalizeAgentInputDrafts(persisted.agentInputDrafts, agentConversations)
     : normalizeAgentInputDraftsByKey(persisted.agentInputDrafts)
   let agentInputDrafts = cleanStaleAgentInputDrafts(normalizedAgentInputDrafts, activeAgentConversationId)
-  if (appMode === 'agent' && activeAgentConversationId && !agentInputDrafts[activeAgentConversationId] && settings.persistInputOnRestart && typeof persisted.prompt === 'string') {
-    agentInputDrafts = {
-      ...agentInputDrafts,
-      [activeAgentConversationId]: normalizeAgentInputDraft({
-        prompt: persisted.prompt,
-        inputImages: persisted.inputImages,
-        maskDraft: null,
-        maskEditorImageId: null,
-      }, Date.now()),
-    }
-  }
-  const restoredAgentDraft = appMode === 'agent' && activeAgentConversationId
-    ? agentInputDrafts[activeAgentConversationId] ?? null
-    : null
   const favoriteCollections = Array.isArray(persisted.favoriteCollections)
     ? ensureDefaultFavoriteCollection(normalizeFavoriteCollections(persisted.favoriteCollections))
     : currentState.favoriteCollections
@@ -771,10 +757,10 @@ function mergePersistedState(persistedState: unknown, currentState: AppState): A
     supportPromptDismissed: Boolean(persisted.supportPromptDismissed),
     supportPromptOpen: Boolean(persisted.supportPromptOpen),
     supportPromptSkippedForImportedData: Boolean(persisted.supportPromptSkippedForImportedData),
-    prompt: restoredAgentDraft ? restoredAgentDraft.prompt : galleryInputDraft?.prompt ?? '',
-    inputImages: restoredAgentDraft ? restoredAgentDraft.inputImages : galleryInputDraft?.inputImages ?? [],
-    maskDraft: restoredAgentDraft ? restoredAgentDraft.maskDraft : galleryInputDraft?.maskDraft ?? null,
-    maskEditorImageId: restoredAgentDraft ? restoredAgentDraft.maskEditorImageId : galleryInputDraft?.maskEditorImageId ?? null,
+    prompt: galleryInputDraft?.prompt ?? '',
+    inputImages: galleryInputDraft?.inputImages ?? [],
+    maskDraft: galleryInputDraft?.maskDraft ?? null,
+    maskEditorImageId: galleryInputDraft?.maskEditorImageId ?? null,
   }
 }
 
@@ -1148,65 +1134,18 @@ export const useStore = create<AppState>()(
     (set, get) => ({
       // Mode
       appMode: 'gallery',
-      setAppMode: (appMode) => {
-        if (appMode === 'gallery') {
-          const state = get()
-          const agentInputDrafts = saveActiveAgentInputDrafts(state)
-          const galleryInputDraft = saveGalleryInputDraft(state)
-          set((state) => ({
-            appMode,
-            agentInputDrafts,
-            galleryInputDraft,
-            agentMobileHeaderVisible: true,
-            selectedTaskIds: [],
-            selectedFavoriteCollectionIds: [],
-            agentEditingRoundId: null,
-            ...(state.appMode === 'agent' ? restoreGalleryInputDraftState(galleryInputDraft) : {}),
-          }))
-          return
-        }
-
+      setAppMode: () => {
         const state = get()
-        const settings = normalizeSettings(state.settings)
-        const activeProfile = getActiveApiProfile(settings)
-        const agentValidationError = getAgentProfileValidationError(settings)
-
-        if (!agentValidationError) {
-          const galleryInputDraft = saveGalleryInputDraft(state)
-          set((state) => ({
-            appMode: 'agent',
-            galleryInputDraft,
-            agentMobileHeaderVisible: false,
-            agentSidebarCollapsed: true,
-            agentAssetPanelCollapsed: true,
-            selectedTaskIds: [],
-            selectedFavoriteCollectionIds: [],
-            ...restoreAgentInputDraftState(state.agentInputDrafts, state.activeAgentConversationId),
-          }))
-          return
-        }
-
-        if (settings.agentApiConfigMode !== 'off') {
-          state.setConfirmDialog({
-            title: 'Agent API 配置不完整',
-            message: `${agentValidationError.message}\n\n请前往 Agent 配置页，选择或新建可用配置。`,
-            confirmText: '去设置',
-            cancelText: '取消',
-            action: () => {
-              useStore.getState().setShowSettings(true, 'agent')
-            },
-          })
-          return
-        }
-
-        state.setConfirmDialog({
-          title: '配置不支持 Agent 模式',
-          message: `当前配置「${activeProfile.name}」暂不支持 Agent 模式。\n\n请前往 Agent 配置页调整调用方式。`,
-          confirmText: '去设置',
-          cancelText: '取消',
-          action: () => {
-            useStore.getState().setShowSettings(true, 'agent')
-          },
+        const agentInputDrafts = saveActiveAgentInputDrafts(state)
+        const galleryInputDraft = saveGalleryInputDraft(state)
+        set({
+          appMode: 'gallery',
+          agentInputDrafts,
+          galleryInputDraft,
+          agentMobileHeaderVisible: true,
+          selectedTaskIds: [],
+          selectedFavoriteCollectionIds: [],
+          agentEditingRoundId: null,
         })
       },
 

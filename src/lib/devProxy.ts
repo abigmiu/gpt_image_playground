@@ -63,17 +63,18 @@ export function buildApiUrl(
 ): string {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
   const endpointPath = path.replace(/^\/+/, '')
+  const usesProductPlaygroundBase = normalizedBaseUrl.endsWith('/playground')
 
   if (useApiProxy) {
     return `${proxyConfig?.prefix ?? DEFAULT_PROXY_PREFIX}/${endpointPath}`
   }
 
-  const apiPath = normalizedBaseUrl.endsWith('/v1')
+  const apiPath = normalizedBaseUrl.endsWith('/v1') || usesProductPlaygroundBase
     ? endpointPath
     : ['v1', endpointPath].join('/')
 
   if (normalizedBaseUrl.startsWith('/')) {
-    return normalizedBaseUrl.endsWith('/v1')
+    return normalizedBaseUrl.endsWith('/v1') || usesProductPlaygroundBase
       ? `${normalizedBaseUrl}/${endpointPath}`
       : `${normalizedBaseUrl}/${apiPath}`
   }

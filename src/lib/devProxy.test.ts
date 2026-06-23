@@ -36,4 +36,10 @@ describe('buildApiUrl', () => {
       'http://api.example.com/v1/responses',
     )
   })
+
+  it('does not append an extra v1 for product playground routes', () => {
+    expect(buildApiUrl('/api/v1/playground', 'images/generations', null, false)).toBe(
+      '/api/v1/playground/images/generations',
+    )
+  })
 })
