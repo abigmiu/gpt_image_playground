@@ -4,11 +4,12 @@ import { useVersionCheck } from '../hooks/useVersionCheck'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { clearSub2ApiAuthSession, getSub2ApiAuthSession, getSub2ApiCurrentUser, getSub2ApiUserDisplayName, logoutSub2Api, subscribeSub2ApiAuthChange, type Sub2ApiCurrentUser } from '../lib/sub2apiAuth'
+import { listSub2ApiAnnouncements } from '../lib/sub2apiAnnouncements'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import Sub2ApiAuthModal from './Sub2ApiAuthModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
-import { HelpCircleIcon, InstallIcon, SettingsIcon } from './icons'
+import { BellIcon, HelpCircleIcon, InstallIcon, SettingsIcon } from './icons'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -24,6 +25,7 @@ export default function Header() {
   const appMode = useStore((s) => s.appMode)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const setShowAnnouncementCenter = useStore((s) => s.setShowAnnouncementCenter)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const favoriteCollectionTitle = useFavoriteCollectionTitle()
@@ -38,6 +40,7 @@ export default function Header() {
   const [showHeaderMenu, setShowHeaderMenu] = useState(false)
   const [authUser, setAuthUser] = useState<Sub2ApiCurrentUser | null>(null)
   const [authReady, setAuthReady] = useState(false)
+  const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0)
   const showToast = useStore((s) => s.showToast)
   const headerMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -69,6 +72,7 @@ export default function Header() {
 
   const installTooltip = useTooltip()
   const helpTooltip = useTooltip()
+  const announcementTooltip = useTooltip()
   const settingsTooltip = useTooltip()
 
   useEffect(() => {
@@ -100,6 +104,7 @@ export default function Header() {
       if (!session?.accessToken) {
         if (!cancelled) {
           setAuthUser(null)
+          setAnnouncementUnreadCount(0)
           setAuthReady(true)
         }
         return
@@ -130,6 +135,34 @@ export default function Header() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+
+    const syncAnnouncementUnread = async () => {
+      const session = getSub2ApiAuthSession()
+      if (!session?.accessToken) {
+        if (!cancelled) setAnnouncementUnreadCount(0)
+        return
+      }
+      try {
+        const announcements = await listSub2ApiAnnouncements(true)
+        if (!cancelled) setAnnouncementUnreadCount(announcements.length)
+      } catch {
+        if (!cancelled) setAnnouncementUnreadCount(0)
+      }
+    }
+
+    void syncAnnouncementUnread()
+    const unsubscribe = subscribeSub2ApiAuthChange(() => {
+      void syncAnnouncementUnread()
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
     if (!showHeaderMenu) return
 
     const handlePointerDown = (event: MouseEvent) => {
@@ -142,6 +175,26 @@ export default function Header() {
   }, [showHeaderMenu])
 
   const authDisplayName = getSub2ApiUserDisplayName(authUser)
+
+  const openRecharge = () => {
+    dismissAllTooltips()
+    setShowSub2ApiPaymentModal(true, 'recharge')
+  }
+
+  const openAnnouncements = () => {
+    dismissAllTooltips()
+    setShowAnnouncementCenter(true)
+  }
+
+  const openHelp = () => {
+    dismissAllTooltips()
+    setShowHelp(true)
+  }
+
+  const openSettings = () => {
+    dismissAllTooltips()
+    setShowSettings(true)
+  }
 
   const handleLogout = async () => {
     try {
@@ -194,7 +247,7 @@ export default function Header() {
       <header data-no-drag-select className="safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08] transition-transform duration-300 ease-in-out translate-y-0">
         <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between relative">
           <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
-            <div ref={headerMenuRef} className="relative mr-2">
+            <div ref={headerMenuRef} className="relative mr-2 sm:hidden">
               <button
                 type="button"
                 onClick={() => setShowHeaderMenu((value) => !value)}
@@ -220,6 +273,41 @@ export default function Header() {
                 </div>
               ) : null}
             </div>
+            <nav className="hidden sm:flex items-center gap-1 mr-3">
+              <button
+                type="button"
+                onClick={openRecharge}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+              >
+                充值
+              </button>
+              <button
+                type="button"
+                onClick={openAnnouncements}
+                className="relative rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+              >
+                公告
+                {announcementUnreadCount > 0 ? (
+                  <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold leading-none text-white">
+                    {announcementUnreadCount > 9 ? '9+' : announcementUnreadCount}
+                  </span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={openHelp}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+              >
+                操作指南
+              </button>
+              <button
+                type="button"
+                onClick={openSettings}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+              >
+                设置
+              </button>
+            </nav>
             <h1 className="inline-flex min-w-0 items-start relative">
               {showFavoriteCollectionTitle ? (
                 <span className="min-w-0 truncate text-[17px] font-bold tracking-tight text-gray-800 dark:text-gray-100 sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
@@ -267,14 +355,31 @@ export default function Header() {
               </div>
             )}
             <div
-              className="relative"
+              className="relative sm:hidden"
+              {...announcementTooltip.handlers}
+            >
+              <button
+                onClick={openAnnouncements}
+                className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
+                aria-label="公告"
+              >
+                <BellIcon className={`w-5 h-5 ${announcementUnreadCount > 0 ? 'text-orange-500' : 'text-gray-600 dark:text-gray-400'}`} />
+                {announcementUnreadCount > 0 ? (
+                  <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold leading-none text-white">
+                    {announcementUnreadCount > 9 ? '9+' : announcementUnreadCount}
+                  </span>
+                ) : null}
+              </button>
+              <ViewportTooltip visible={announcementTooltip.visible} className="whitespace-nowrap">
+                公告
+              </ViewportTooltip>
+            </div>
+            <div
+              className="relative sm:hidden"
               {...helpTooltip.handlers}
             >
               <button
-                onClick={() => {
-                  dismissAllTooltips()
-                  setShowHelp(true)
-                }}
+                onClick={openHelp}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
                 aria-label="操作指南"
               >
@@ -317,14 +422,11 @@ export default function Header() {
               </button>
             )}
             <div
-              className="relative"
+              className="relative sm:hidden"
               {...settingsTooltip.handlers}
             >
               <button
-                onClick={() => {
-                  dismissAllTooltips()
-                  setShowSettings(true)
-                }}
+                onClick={openSettings}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors"
                 aria-label="设置"
               >

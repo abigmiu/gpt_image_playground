@@ -877,6 +877,8 @@ interface AppState {
   showSub2ApiPaymentModal: boolean
   sub2ApiPaymentModalTab: Sub2ApiPaymentModalTab
   setShowSub2ApiPaymentModal: (show: boolean, tab?: Sub2ApiPaymentModalTab) => void
+  showAnnouncementCenter: boolean
+  setShowAnnouncementCenter: (show: boolean) => void
   supportPromptOpen: boolean
   supportPromptDismissed: boolean
   supportPromptSkippedForImportedData: boolean
@@ -1533,6 +1535,11 @@ export const useStore = create<AppState>()(
           ...(sub2ApiPaymentModalTab ? { sub2ApiPaymentModalTab } : {}),
           ...(!showSub2ApiPaymentModal ? { sub2ApiPaymentModalTab: 'recharge' } : {}),
         })
+      },
+      showAnnouncementCenter: false,
+      setShowAnnouncementCenter: (showAnnouncementCenter) => {
+        if (showAnnouncementCenter) dismissAllTooltips()
+        set({ showAnnouncementCenter })
       },
       supportPromptOpen: false,
       supportPromptDismissed: false,
