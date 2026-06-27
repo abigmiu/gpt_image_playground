@@ -117,7 +117,7 @@ export interface AppSettings {
   activeProfileId: string
 }
 
-export type Sub2ApiPaymentModalTab = 'recharge'
+export type Sub2ApiPaymentModalTab = 'recharge' | 'orders'
 
 // ===== 任务参数 =====
 

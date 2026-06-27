@@ -181,6 +181,11 @@ export default function Header() {
     setShowSub2ApiPaymentModal(true, 'recharge')
   }
 
+  const openOrders = () => {
+    dismissAllTooltips()
+    setShowSub2ApiPaymentModal(true, 'orders')
+  }
+
   const openAnnouncements = () => {
     dismissAllTooltips()
     setShowAnnouncementCenter(true)
@@ -270,6 +275,16 @@ export default function Header() {
                   >
                     充值
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeaderMenu(false)
+                      setShowSub2ApiPaymentModal(true, 'orders')
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                  >
+                    我的订单
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -280,6 +295,13 @@ export default function Header() {
                 className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
               >
                 充值
+              </button>
+              <button
+                type="button"
+                onClick={openOrders}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+              >
+                我的订单
               </button>
               <button
                 type="button"

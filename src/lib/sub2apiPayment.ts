@@ -107,6 +107,13 @@ export interface PaymentOrder {
   expires_at: string
 }
 
+export interface PaymentOrderListResponse {
+  items: PaymentOrder[]
+  total: number
+  page: number
+  page_size: number
+}
+
 interface Sub2ApiEnvelope<T> {
   code: number
   message: string
@@ -244,6 +251,27 @@ export async function getPaymentOrder(id: number): Promise<PaymentOrder> {
     cache: 'no-store',
   })
   const payload = await parseJsonResponse<PaymentOrder>(response)
+  if (!response.ok || payload.code !== 0 || !payload.data) {
+    throw toApiError(response, payload)
+  }
+  return payload.data
+}
+
+export async function getMyPaymentOrders(params: {
+  page?: number
+  page_size?: number
+  status?: string
+} = {}): Promise<PaymentOrderListResponse> {
+  const search = new URLSearchParams()
+  if (typeof params.page === 'number' && params.page > 0) search.set('page', String(params.page))
+  if (typeof params.page_size === 'number' && params.page_size > 0) search.set('page_size', String(params.page_size))
+  if (typeof params.status === 'string' && params.status.trim()) search.set('status', params.status.trim())
+
+  const query = search.toString()
+  const response = await fetchWithSub2ApiAuth(buildAuthUrl(`payment/orders/my${query ? `?${query}` : ''}`), {
+    cache: 'no-store',
+  })
+  const payload = await parseJsonResponse<PaymentOrderListResponse>(response)
   if (!response.ok || payload.code !== 0 || !payload.data) {
     throw toApiError(response, payload)
   }

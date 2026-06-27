@@ -113,7 +113,6 @@ function formatPaymentAmount(value: number, currency?: string) {
 export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProps) {
   const modalRef = useRef<HTMLDivElement>(null)
   const showToast = useStore((s) => s.showToast)
-  const setShowSub2ApiPaymentModal = useStore((s) => s.setShowSub2ApiPaymentModal)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [amount, setAmount] = useState<number | null>(null)
@@ -381,10 +380,7 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
           </div>
           <button
             type="button"
-            onClick={() => {
-              setShowSub2ApiPaymentModal(false)
-              onClose()
-            }}
+            onClick={onClose}
             className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
             aria-label="关闭"
           >

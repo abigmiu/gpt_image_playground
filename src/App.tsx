@@ -16,6 +16,7 @@ import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
 import Sub2ApiPaymentModal from './components/Sub2ApiPaymentModal'
+import Sub2ApiOrdersModal from './components/Sub2ApiOrdersModal'
 import Sub2ApiAnnouncementModal from './components/Sub2ApiAnnouncementModal'
 import Sub2ApiAnnouncementCenterModal from './components/Sub2ApiAnnouncementCenterModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
@@ -26,6 +27,7 @@ export default function App() {
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const showSub2ApiPaymentModal = useStore((s) => s.showSub2ApiPaymentModal)
   const setShowSub2ApiPaymentModal = useStore((s) => s.setShowSub2ApiPaymentModal)
+  const sub2ApiPaymentModalTab = useStore((s) => s.sub2ApiPaymentModalTab)
   const showAnnouncementCenter = useStore((s) => s.showAnnouncementCenter)
   const setShowAnnouncementCenter = useStore((s) => s.setShowAnnouncementCenter)
   const {
@@ -75,8 +77,11 @@ export default function App() {
       <Toast />
       <MaskEditorModal />
       <ImageContextMenu />
-      {showSub2ApiPaymentModal ? (
+      {showSub2ApiPaymentModal && sub2ApiPaymentModalTab === 'recharge' ? (
         <Sub2ApiPaymentModal onClose={() => setShowSub2ApiPaymentModal(false)} />
+      ) : null}
+      {showSub2ApiPaymentModal && sub2ApiPaymentModalTab === 'orders' ? (
+        <Sub2ApiOrdersModal onClose={() => setShowSub2ApiPaymentModal(false)} />
       ) : null}
       {showAnnouncementCenter ? (
         <Sub2ApiAnnouncementCenterModal
