@@ -1,4 +1,5 @@
 import { DEFAULT_STREAM_PARTIAL_IMAGES, type ApiProfile, type CustomProviderDefinition, type CustomProviderPollMapping, type CustomProviderResultMapping, type CustomProviderSubmitMapping, type ImageApiResponse, type ImageResponseItem, type ResponsesApiResponse, type ResponsesOutputItem, type TaskParams } from '../types'
+import { DEFAULT_OPENAI_PROFILE_ID } from './apiProfiles'
 import { dataUrlToBlob, imageDataUrlToPngBlob, maskDataUrlToPngBlob } from './canvasImage'
 import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devProxy'
 import { fetchWithSub2ApiAuth } from './sub2apiAuth'
@@ -39,6 +40,15 @@ function createOpenAICompatiblePaths() {
     generationPath: 'images/generations',
     editPath: 'images/edits',
   }
+}
+
+function isBuiltInPlaygroundTaskApi(profile: ApiProfile, customProvider?: CustomProviderDefinition | null) {
+  if (customProvider) return false
+  return profile.id === DEFAULT_OPENAI_PROFILE_ID &&
+    profile.provider === 'openai' &&
+    profile.apiMode === 'images' &&
+    !profile.apiKey.trim() &&
+    profile.baseUrl.replace(/\/+$/, '').endsWith('/api/v1/playground')
 }
 
 function getByPath(source: unknown, path: string | undefined): unknown {
@@ -477,6 +487,9 @@ async function parseResponsesApiStreamResponse(
 }
 
 export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile: ApiProfile, customProvider?: CustomProviderDefinition | null): Promise<CallApiResult> {
+  if (isBuiltInPlaygroundTaskApi(profile, customProvider)) {
+    return callPlaygroundTaskImageApi(opts, profile)
+  }
   if (customProvider) {
     return callCustomHttpImageApi(opts, profile, customProvider)
   }
@@ -484,6 +497,111 @@ export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile
   return profile.apiMode === 'responses'
     ? callResponsesImageApi(opts, profile)
     : callImagesApi(opts, profile)
+}
+
+async function callPlaygroundTaskImageApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
+  const { params, inputImageDataUrls } = opts
+  const isEdit = inputImageDataUrls.length > 0
+  const mime = MIME_MAP[params.output_format] || 'image/png'
+  const proxyConfig = readClientDevProxyConfig()
+  const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
+  const controller = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => controller.abort(), profile.timeout * 1000)
+
+  try {
+    const taskPath = isEdit ? 'image-tasks/edits' : 'image-tasks'
+    const requestHeaders = createRequestHeaders()
+    let response: Response
+
+    if (isEdit) {
+      const formData = new FormData()
+      formData.append('prompt', opts.prompt)
+      formData.append('size', params.size)
+      formData.append('output_format', params.output_format)
+      formData.append('moderation', params.moderation)
+      formData.append('quality', params.quality)
+      if (params.output_format !== 'png' && params.output_compression != null) {
+        formData.append('output_compression', String(params.output_compression))
+      }
+      if (params.n > 1) formData.append('n', String(params.n))
+
+      const imageBlobs: Blob[] = []
+      for (let i = 0; i < inputImageDataUrls.length; i++) {
+        const dataUrl = inputImageDataUrls[i]
+        const blob = opts.maskDataUrl && i === 0 ? await imageDataUrlToPngBlob(dataUrl) : await dataUrlToBlob(dataUrl)
+        imageBlobs.push(blob)
+      }
+      const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
+      if (opts.maskDataUrl) {
+        assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
+        assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
+      }
+      assertImageInputPayloadSize(imageBlobs.reduce((sum, blob) => sum + blob.size, 0) + (maskBlob?.size ?? 0))
+      for (let i = 0; i < imageBlobs.length; i++) {
+        const blob = imageBlobs[i]
+        const ext = blob.type.split('/')[1] || 'png'
+        formData.append('image[]', blob, `input-${i + 1}.${ext}`)
+      }
+      if (maskBlob) formData.append('mask', maskBlob, 'mask.png')
+
+      response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, taskPath, proxyConfig, useApiProxy), {
+        method: 'POST',
+        headers: requestHeaders,
+        cache: 'no-store',
+        body: formData,
+        signal: controller.signal,
+      })
+    } else {
+      const body: Record<string, unknown> = {
+        prompt: opts.prompt,
+        size: params.size,
+        quality: params.quality,
+        output_format: params.output_format,
+        moderation: params.moderation,
+      }
+      if (params.output_format !== 'png' && params.output_compression != null) {
+        body.output_compression = params.output_compression
+      }
+      if (params.n > 1) body.n = params.n
+
+      response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, taskPath, proxyConfig, useApiProxy), {
+        method: 'POST',
+        headers: {
+          ...requestHeaders,
+          'Content-Type': 'application/json',
+        },
+        cache: 'no-store',
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+    }
+
+    if (!response.ok) throw new Error(await getApiErrorMessage(response))
+    const submitPayload = await response.json() as { id?: string; status?: string }
+    const taskId = typeof submitPayload.id === 'string' ? submitPayload.id.trim() : ''
+    if (!taskId) throw new Error('无法从 playground 任务响应中提取任务 ID')
+    opts.onCustomTaskEnqueued?.({ taskId })
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+      timeoutId = null
+    }
+
+    return pollCustomTaskResult(profile, {
+      path: 'image-tasks/{task_id}',
+      method: 'GET',
+      intervalSeconds: 5,
+      statusPath: 'status',
+      successValues: ['succeeded'],
+      failureValues: ['failed'],
+      errorPath: 'error_message',
+      result: {
+        imageUrlPaths: ['data.*.url'],
+        b64JsonPaths: [],
+      },
+    }, taskId, mime, controller.signal)
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
 }
 
 async function callImagesApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
@@ -942,6 +1060,27 @@ export async function getCustomQueuedImageResult(
   if (!customProvider.poll) throw new Error('自定义异步任务缺少 poll 配置')
   const mime = MIME_MAP[params.output_format] || 'image/png'
   return pollCustomTaskResult(profile, customProvider.poll, taskId, mime)
+}
+
+export async function getPlaygroundQueuedImageResult(
+  profile: ApiProfile,
+  taskId: string,
+  params: TaskParams,
+): Promise<CallApiResult> {
+  const mime = MIME_MAP[params.output_format] || 'image/png'
+  return pollCustomTaskResult(profile, {
+    path: 'image-tasks/{task_id}',
+    method: 'GET',
+    intervalSeconds: 5,
+    statusPath: 'status',
+    successValues: ['succeeded'],
+    failureValues: ['failed'],
+    errorPath: 'error_message',
+    result: {
+      imageUrlPaths: ['data.*.url'],
+      b64JsonPaths: [],
+    },
+  }, taskId, mime)
 }
 
 async function callCustomHttpImageApi(opts: CallApiOptions, profile: ApiProfile, customProvider: CustomProviderDefinition): Promise<CallApiResult> {

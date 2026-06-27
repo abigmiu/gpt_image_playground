@@ -14,12 +14,15 @@ import Toast from './components/Toast'
 import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
+import Sub2ApiPaymentModal from './components/Sub2ApiPaymentModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
 
 export default function App() {
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
+  const showSub2ApiPaymentModal = useStore((s) => s.showSub2ApiPaymentModal)
+  const setShowSub2ApiPaymentModal = useStore((s) => s.setShowSub2ApiPaymentModal)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
@@ -58,6 +61,9 @@ export default function App() {
       <Toast />
       <MaskEditorModal />
       <ImageContextMenu />
+      {showSub2ApiPaymentModal ? (
+        <Sub2ApiPaymentModal onClose={() => setShowSub2ApiPaymentModal(false)} />
+      ) : null}
     </>
   )
 }

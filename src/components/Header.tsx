@@ -28,15 +28,18 @@ export default function Header() {
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const favoriteCollectionTitle = useFavoriteCollectionTitle()
   const showFavoriteCollectionTitle = appMode === 'gallery' && Boolean(activeFavoriteCollectionId)
+  const setShowSub2ApiPaymentModal = useStore((s) => s.setShowSub2ApiPaymentModal)
   const { hasUpdate, latestRelease, dismiss } = useVersionCheck()
   const [showHelp, setShowHelp] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isPwaInstalled, setIsPwaInstalled] = useState(isInstalledPwa)
   const [scrollDirection, setScrollDirection] = useState<'up' | 'down'>('up')
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false)
   const [authUser, setAuthUser] = useState<Sub2ApiCurrentUser | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const showToast = useStore((s) => s.showToast)
+  const headerMenuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let lastScrollY = window.scrollY
@@ -126,6 +129,18 @@ export default function Header() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!showHeaderMenu) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (headerMenuRef.current?.contains(event.target as Node)) return
+      setShowHeaderMenu(false)
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    return () => window.removeEventListener('mousedown', handlePointerDown)
+  }, [showHeaderMenu])
+
   const authDisplayName = getSub2ApiUserDisplayName(authUser)
 
   const handleLogout = async () => {
@@ -179,29 +194,36 @@ export default function Header() {
       <header data-no-drag-select className="safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08] transition-transform duration-300 ease-in-out translate-y-0">
         <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between relative">
           <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
-            <h1 className="inline-flex min-w-0 items-start relative mr-2">
-              {showFavoriteCollectionTitle ? (
-                <>
-                  <span className="min-w-0 truncate text-[17px] font-bold tracking-tight text-gray-800 dark:text-gray-100 sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
-                  <a
-                    href="https://github.com/CookSleep/gpt_image_playground"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hidden text-lg font-bold tracking-tight text-gray-800 transition-colors hover:text-gray-600 dark:text-gray-100 dark:hover:text-gray-300 sm:inline"
+            <div ref={headerMenuRef} className="relative mr-2">
+              <button
+                type="button"
+                onClick={() => setShowHeaderMenu((value) => !value)}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[17px] font-bold tracking-tight text-gray-800 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:text-gray-100 dark:hover:bg-gray-900 dark:hover:text-gray-300 sm:text-lg"
+                aria-haspopup="menu"
+                aria-expanded={showHeaderMenu}
+              >
+                <span>菜单</span>
+                <span className={`text-sm transition-transform ${showHeaderMenu ? 'rotate-180' : ''}`}>▼</span>
+              </button>
+              {showHeaderMenu ? (
+                <div className="absolute left-0 top-full z-50 mt-2 min-w-[160px] overflow-hidden rounded-xl border border-gray-200/70 bg-white/95 p-1 shadow-xl ring-1 ring-black/5 dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeaderMenu(false)
+                      setShowSub2ApiPaymentModal(true, 'recharge')
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
                   >
-                    GPT Image Playground
-                  </a>
-                </>
-              ) : (
-                <a
-                  href="https://github.com/CookSleep/gpt_image_playground"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[17px] sm:text-lg font-bold tracking-tight text-gray-800 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                >
-                  GPT Image Playground
-                </a>
-              )}
+                    充值
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <h1 className="inline-flex min-w-0 items-start relative">
+              {showFavoriteCollectionTitle ? (
+                <span className="min-w-0 truncate text-[17px] font-bold tracking-tight text-gray-800 dark:text-gray-100 sm:hidden" title={favoriteCollectionTitle}>{favoriteCollectionTitle}</span>
+              ) : null}
               {hasUpdate && latestRelease && (
                 <a
                   href={latestRelease.url}

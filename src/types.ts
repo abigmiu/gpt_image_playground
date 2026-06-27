@@ -117,6 +117,8 @@ export interface AppSettings {
   activeProfileId: string
 }
 
+export type Sub2ApiPaymentModalTab = 'recharge'
+
 // ===== 任务参数 =====
 
 export interface TaskParams {

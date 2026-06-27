@@ -8,6 +8,7 @@ import type {
   ApiProfile,
   AppSettings,
   AppMode,
+  Sub2ApiPaymentModalTab,
   TaskParams,
   InputImage,
   MaskDraft,
@@ -42,12 +43,13 @@ import {
   storeImageWithSize,
 } from './lib/db'
 import { callImageApi } from './lib/api'
+import { DEFAULT_OPENAI_PROFILE_ID } from './lib/apiProfiles'
 import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments, type AgentApiResultImage } from './lib/agentApi'
 import { collectAgentRoundOutputImageSlots, extractAgentReferenceIds, getAgentCurrentReferenceId, getAgentGeneratedImageReferenceId, replaceAgentPromptImageReferencesForApi } from './lib/agentImageReferences'
 import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
-import { getCustomQueuedImageResult } from './lib/openaiCompatibleImageApi'
+import { getCustomQueuedImageResult, getPlaygroundQueuedImageResult } from './lib/openaiCompatibleImageApi'
 import { validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
@@ -872,6 +874,9 @@ interface AppState {
   showSettings: boolean
   settingsTabRequest: SettingsTab | null
   setShowSettings: (v: boolean, tab?: SettingsTab) => void
+  showSub2ApiPaymentModal: boolean
+  sub2ApiPaymentModalTab: Sub2ApiPaymentModalTab
+  setShowSub2ApiPaymentModal: (show: boolean, tab?: Sub2ApiPaymentModalTab) => void
   supportPromptOpen: boolean
   supportPromptDismissed: boolean
   supportPromptSkippedForImportedData: boolean
@@ -1519,6 +1524,16 @@ export const useStore = create<AppState>()(
           ...(!showSettings ? { settingsTabRequest: null } : {}),
         })
       },
+      showSub2ApiPaymentModal: false,
+      sub2ApiPaymentModalTab: 'recharge',
+      setShowSub2ApiPaymentModal: (showSub2ApiPaymentModal, sub2ApiPaymentModalTab) => {
+        if (showSub2ApiPaymentModal) dismissAllTooltips()
+        set({
+          showSub2ApiPaymentModal,
+          ...(sub2ApiPaymentModalTab ? { sub2ApiPaymentModalTab } : {}),
+          ...(!showSub2ApiPaymentModal ? { sub2ApiPaymentModalTab: 'recharge' } : {}),
+        })
+      },
       supportPromptOpen: false,
       supportPromptDismissed: false,
       supportPromptSkippedForImportedData: false,
@@ -1629,6 +1644,17 @@ function isRunningOpenAITask(task: TaskRecord) {
 }
 
 function isAsyncCustomProviderTask(settings: AppSettings, provider: string, hasInputImages: boolean) {
+  const profile = getActiveApiProfile(settings)
+  if (
+    provider === 'openai' &&
+    profile.id === DEFAULT_OPENAI_PROFILE_ID &&
+    profile.provider === 'openai' &&
+    profile.apiMode === 'images' &&
+    !profile.apiKey.trim() &&
+    profile.baseUrl.replace(/\/+$/, '').endsWith('/api/v1/playground')
+  ) {
+    return true
+  }
   const customProvider = getCustomProviderDefinition(settings, provider)
   if (!customProvider?.poll) return false
   const submitMapping = hasInputImages && customProvider.editSubmit ? customProvider.editSubmit : customProvider.submit
@@ -1746,8 +1772,20 @@ function getFalRecoveryProfile(settings: AppSettings, task: TaskRecord) {
 
 function getCustomRecoveryProfile(settings: AppSettings, task: TaskRecord) {
   const provider = task.apiProvider
-  if (!provider || provider === 'openai' || provider === 'fal') return null
   const taskProfile = getTaskApiProfile(settings, task)
+  if (provider === 'openai') {
+    if (
+      taskProfile?.provider === 'openai' &&
+      taskProfile.id === DEFAULT_OPENAI_PROFILE_ID &&
+      taskProfile.apiMode === 'images' &&
+      !taskProfile.apiKey.trim() &&
+      taskProfile.baseUrl.replace(/\/+$/, '').endsWith('/api/v1/playground')
+    ) {
+      return taskProfile
+    }
+    return null
+  }
+  if (!provider || provider === 'fal') return null
   if (taskProfile?.provider === provider) return taskProfile
   return null
 }
@@ -4935,13 +4973,24 @@ async function recoverCustomTask(taskId: string) {
 
   const profile = getCustomRecoveryProfile(settings, task)
   const customProvider = task.apiProvider ? getCustomProviderDefinition(settings, task.apiProvider) : null
-  if (!profile || !customProvider?.poll) {
+  const isPlaygroundBuiltIn = Boolean(
+    profile &&
+      task.apiProvider === 'openai' &&
+      profile.id === DEFAULT_OPENAI_PROFILE_ID &&
+      profile.provider === 'openai' &&
+      profile.apiMode === 'images' &&
+      !profile.apiKey.trim() &&
+      profile.baseUrl.replace(/\/+$/, '').endsWith('/api/v1/playground'),
+  )
+  if (!profile || (!isPlaygroundBuiltIn && !customProvider?.poll)) {
     scheduleCustomRecovery(taskId)
     return
   }
 
   try {
-    const result = await getCustomQueuedImageResult(profile, customProvider, task.customTaskId, task.params)
+    const result = isPlaygroundBuiltIn
+      ? await getPlaygroundQueuedImageResult(profile, task.customTaskId, task.params)
+      : await getCustomQueuedImageResult(profile, customProvider!, task.customTaskId, task.params)
     clearCustomRecoveryTimer(taskId)
     await completeRecoveredCustomTask(task, result)
   } catch (err) {
