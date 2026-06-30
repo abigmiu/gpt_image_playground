@@ -514,43 +514,71 @@ async function callPlaygroundTaskImageApi(opts: CallApiOptions, profile: ApiProf
     let response: Response
 
     if (isEdit) {
-      const formData = new FormData()
-      formData.append('prompt', opts.prompt)
-      formData.append('size', params.size)
-      formData.append('output_format', params.output_format)
-      formData.append('moderation', params.moderation)
-      formData.append('quality', params.quality)
-      if (params.output_format !== 'png' && params.output_compression != null) {
-        formData.append('output_compression', String(params.output_compression))
-      }
-      if (params.n > 1) formData.append('n', String(params.n))
+      const inputImageUrls = opts.inputImageUrls?.filter((url) => isHttpUrl(url)) ?? []
+      if (inputImageUrls.length === inputImageDataUrls.length && inputImageUrls.length > 0) {
+        const body: Record<string, unknown> = {
+          prompt: opts.prompt,
+          size: params.size,
+          output_format: params.output_format,
+          moderation: params.moderation,
+          quality: params.quality,
+          images: inputImageUrls.map((imageUrl) => ({ image_url: imageUrl })),
+        }
+        if (params.output_format !== 'png' && params.output_compression != null) {
+          body.output_compression = params.output_compression
+        }
+        if (params.n > 1) body.n = params.n
+        if (opts.maskUrl) body.mask = { image_url: opts.maskUrl }
 
-      const imageBlobs: Blob[] = []
-      for (let i = 0; i < inputImageDataUrls.length; i++) {
-        const dataUrl = inputImageDataUrls[i]
-        const blob = opts.maskDataUrl && i === 0 ? await imageDataUrlToPngBlob(dataUrl) : await dataUrlToBlob(dataUrl)
-        imageBlobs.push(blob)
-      }
-      const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
-      if (opts.maskDataUrl) {
-        assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
-        assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
-      }
-      assertImageInputPayloadSize(imageBlobs.reduce((sum, blob) => sum + blob.size, 0) + (maskBlob?.size ?? 0))
-      for (let i = 0; i < imageBlobs.length; i++) {
-        const blob = imageBlobs[i]
-        const ext = blob.type.split('/')[1] || 'png'
-        formData.append('image[]', blob, `input-${i + 1}.${ext}`)
-      }
-      if (maskBlob) formData.append('mask', maskBlob, 'mask.png')
+        response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, taskPath, proxyConfig, useApiProxy), {
+          method: 'POST',
+          headers: {
+            ...requestHeaders,
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+      } else {
+        const formData = new FormData()
+        formData.append('prompt', opts.prompt)
+        formData.append('size', params.size)
+        formData.append('output_format', params.output_format)
+        formData.append('moderation', params.moderation)
+        formData.append('quality', params.quality)
+        if (params.output_format !== 'png' && params.output_compression != null) {
+          formData.append('output_compression', String(params.output_compression))
+        }
+        if (params.n > 1) formData.append('n', String(params.n))
 
-      response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, taskPath, proxyConfig, useApiProxy), {
-        method: 'POST',
-        headers: requestHeaders,
-        cache: 'no-store',
-        body: formData,
-        signal: controller.signal,
-      })
+        const imageBlobs: Blob[] = []
+        for (let i = 0; i < inputImageDataUrls.length; i++) {
+          const dataUrl = inputImageDataUrls[i]
+          const blob = opts.maskDataUrl && i === 0 ? await imageDataUrlToPngBlob(dataUrl) : await dataUrlToBlob(dataUrl)
+          imageBlobs.push(blob)
+        }
+        const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
+        if (opts.maskDataUrl) {
+          assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
+          assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
+        }
+        assertImageInputPayloadSize(imageBlobs.reduce((sum, blob) => sum + blob.size, 0) + (maskBlob?.size ?? 0))
+        for (let i = 0; i < imageBlobs.length; i++) {
+          const blob = imageBlobs[i]
+          const ext = blob.type.split('/')[1] || 'png'
+          formData.append('image[]', blob, `input-${i + 1}.${ext}`)
+        }
+        if (maskBlob) formData.append('mask', maskBlob, 'mask.png')
+
+        response = await fetchWithSub2ApiAuth(buildApiUrl(profile.baseUrl, taskPath, proxyConfig, useApiProxy), {
+          method: 'POST',
+          headers: requestHeaders,
+          cache: 'no-store',
+          body: formData,
+          signal: controller.signal,
+        })
+      }
     } else {
       const body: Record<string, unknown> = {
         prompt: opts.prompt,

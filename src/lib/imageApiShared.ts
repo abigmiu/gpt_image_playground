@@ -16,7 +16,10 @@ export interface CallApiOptions {
   params: TaskParams
   /** 输入图片的 data URL 列表 */
   inputImageDataUrls: string[]
+  /** 输入图片对应的远端 URL 列表，优先用于支持 URL 编辑的接口 */
+  inputImageUrls?: string[]
   maskDataUrl?: string
+  maskUrl?: string
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
   onCustomTaskEnqueued?: (task: { taskId: string }) => void
   onPartialImage?: (partial: { image: string; partialImageIndex?: number; requestIndex?: number }) => void

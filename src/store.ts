@@ -50,13 +50,14 @@ import { showBrowserNotification } from './lib/browserNotification'
 import { IMAGE_FETCH_CORS_HINT } from './lib/imageApiShared'
 import { getFalErrorMessage, getFalQueuedImageResult } from './lib/falAiImageApi'
 import { getCustomQueuedImageResult, getPlaygroundQueuedImageResult } from './lib/openaiCompatibleImageApi'
-import { validateMaskMatchesImage } from './lib/canvasImage'
+import { dataUrlToBlob, validateMaskMatchesImage } from './lib/canvasImage'
 import { orderInputImagesForMask } from './lib/mask'
 import { getChangedParams, normalizeParamsForSettings } from './lib/paramCompatibility'
 import { createTransparentOutputMeta, getTransparentRequestParams, removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
 import { blobToDataUrl, fileToDataUrl } from './lib/dataUrl'
 import { formatExportFileTime } from './lib/exportFileName'
 import { buildExportZip, readExportZip, readExportZipFileAsDataUrl } from './lib/exportZip'
+import { canAccessPlaygroundImageUrl, uploadPlaygroundImageFile } from './lib/sub2apiPlaygroundUpload'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
 export const DEFAULT_FAVORITE_COLLECTION_ID = '__default_favorites__'
@@ -675,13 +676,13 @@ export function getPersistedState(state: AppState) {
     ...(settings.persistInputOnRestart && (state.appMode === 'gallery' || galleryInputDraft)
       ? {
           prompt: galleryInputDraft?.prompt ?? '',
-          inputImages: galleryInputDraft?.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) ?? [],
+          inputImages: galleryInputDraft?.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl })) ?? [],
         }
       : {}),
     dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
     appMode: state.appMode,
     galleryInputDraft: settings.persistInputOnRestart && galleryInputDraft
-      ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) }
+      ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl })) }
       : null,
     ...(agentConversationMigrationPending && !agentConversationPersistenceReady
       ? { agentConversations: getPersistableAgentConversations(state.agentConversations) }
@@ -784,6 +785,7 @@ interface AppState {
   setPrompt: (p: string) => void
   inputImages: InputImage[]
   addInputImage: (img: InputImage) => void
+  updateInputImage: (id: string, patch: Partial<InputImage>) => void
   replaceInputImage: (idx: number, img: InputImage) => void
   removeInputImage: (idx: number) => void
   clearInputImages: () => void
@@ -968,7 +970,11 @@ function normalizeInputImages(value: unknown): InputImage[] {
   return value
     .map((img): InputImage | null => {
       if (!isRecord(img) || typeof img.id !== 'string') return null
-      return { id: img.id, dataUrl: typeof img.dataUrl === 'string' ? img.dataUrl : '' }
+      return {
+        id: img.id,
+        dataUrl: typeof img.dataUrl === 'string' ? img.dataUrl : '',
+        fileUrl: typeof img.fileUrl === 'string' && img.fileUrl.trim() ? img.fileUrl : undefined,
+      }
     })
     .filter((img): img is InputImage => img != null)
 }
@@ -1132,7 +1138,7 @@ function getPersistableAgentInputDrafts(state: AppState) {
     if (!conversationIds.has(conversationId) || isEmptyAgentInputDraft(draft)) continue
     persistable[conversationId] = {
       ...copyAgentInputDraft(draft),
-      inputImages: draft.inputImages.map((img) => ({ id: img.id, dataUrl: '' })),
+      inputImages: draft.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl })),
     }
   }
   return persistable
@@ -1216,6 +1222,16 @@ export const useStore = create<AppState>()(
         set((s) => {
           if (s.inputImages.find((i) => i.id === img.id)) return s
           return syncActiveInputDraft(s, { inputImages: [...s.inputImages, img] })
+        }),
+      updateInputImage: (id, patch) =>
+        set((s) => {
+          let changed = false
+          const inputImages = s.inputImages.map((item) => {
+            if (item.id !== id) return item
+            changed = true
+            return { ...item, ...patch }
+          })
+          return changed ? syncActiveInputDraft(s, { inputImages }) : s
         }),
       replaceInputImage: (idx, img) => {
         let removedImageId: string | null = null
@@ -1674,6 +1690,17 @@ function isAsyncCustomProviderTask(settings: AppSettings, provider: string, hasI
   return Boolean(submitMapping.taskIdPath)
 }
 
+function isBuiltInPlaygroundProfile(profile: ApiProfile | null | undefined) {
+  return Boolean(
+    profile &&
+      profile.id === DEFAULT_OPENAI_PROFILE_ID &&
+      profile.provider === 'openai' &&
+      profile.apiMode === 'images' &&
+      !profile.apiKey.trim() &&
+      profile.baseUrl.replace(/\/+$/, '').endsWith('/api/v1/playground'),
+  )
+}
+
 export function markInterruptedOpenAIRunningTasks(tasks: TaskRecord[], now = Date.now()) {
   const interruptedTasks: TaskRecord[] = []
   const updatedTasks = tasks.map((task) => {
@@ -2016,6 +2043,61 @@ async function readImageSizeParamsList(images: string[]): Promise<Array<Partial<
   return Promise.all(images.map((image) => readImageSizeParam(image)))
 }
 
+async function uploadInputImageDataUrl(imageId: string, dataUrl: string, onUploading?: () => void): Promise<string> {
+  const blob = await validateRetryUploadImageBlob(dataUrl)
+  const file = new File([blob], `${imageId}.png`, { type: blob.type || 'image/png' })
+  return uploadPlaygroundImageFile(file, { onUploading })
+}
+
+async function ensurePlaygroundInputImageUrl(imageId: string, stateImage?: InputImage | null): Promise<string> {
+  const liveImage = stateImage ?? useStore.getState().inputImages.find((img) => img.id === imageId) ?? null
+  const storedImage = await getImage(imageId)
+  const currentUrl = liveImage?.fileUrl || storedImage?.fileUrl
+  const currentDataUrl = liveImage?.dataUrl || storedImage?.dataUrl
+  if (!currentDataUrl) throw new Error('输入图片已不存在')
+
+  useStore.getState().updateInputImage(imageId, {
+    uploadStatus: 'signing',
+    uploadError: null,
+  })
+
+  if (currentUrl && await canAccessPlaygroundImageUrl(currentUrl)) {
+    useStore.getState().updateInputImage(imageId, {
+      fileUrl: currentUrl,
+      uploadStatus: 'idle',
+      uploadError: null,
+    })
+    if (storedImage && storedImage.fileUrl !== currentUrl) {
+      await putImage({ ...storedImage, fileUrl: currentUrl })
+    }
+    return currentUrl
+  }
+
+  try {
+    const fileUrl = await uploadInputImageDataUrl(imageId, currentDataUrl, () => {
+      useStore.getState().updateInputImage(imageId, {
+        uploadStatus: 'uploading',
+        uploadError: null,
+      })
+    })
+    useStore.getState().updateInputImage(imageId, {
+      fileUrl,
+      uploadStatus: 'idle',
+      uploadError: null,
+    })
+    const latestStored = storedImage ?? await getImage(imageId)
+    if (latestStored) await putImage({ ...latestStored, fileUrl })
+    return fileUrl
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    useStore.getState().updateInputImage(imageId, {
+      uploadStatus: 'error',
+      uploadError: message,
+    })
+    throw err instanceof Error ? err : new Error(message)
+  }
+}
+
 async function resolveImageSizeParamsList(
   images: string[],
   preferred?: Array<Partial<TaskParams> | undefined>,
@@ -2039,7 +2121,7 @@ async function completeRecoveredFalTask(task: TaskRecord, result: Awaited<Return
   const latest = useStore.getState().tasks.find((item) => item.id === task.id)
   if (!latest || latest.status === 'done') return
 
-  const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images)
+  const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images, result.rawImageUrls)
   const actualParamsList = await resolveImageSizeParamsList(outputDataUrls, result.actualParamsList, outputImageSizes)
 
   updateTaskInStore(task.id, {
@@ -2207,7 +2289,7 @@ export async function initStore() {
     }
     const storedImage = await getImage(img.id)
     if (storedImage?.dataUrl) {
-      restoredInputImages.push({ ...img, dataUrl: storedImage.dataUrl })
+      restoredInputImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl })
       cacheImage(img.id, storedImage.dataUrl)
     }
   }
@@ -2225,7 +2307,7 @@ export async function initStore() {
       }
       const storedImage = await getImage(img.id)
       if (storedImage?.dataUrl) {
-        restoredGalleryImages.push({ ...img, dataUrl: storedImage.dataUrl })
+        restoredGalleryImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl })
         cacheImage(img.id, storedImage.dataUrl)
       }
     }
@@ -2264,7 +2346,7 @@ export async function initStore() {
       }
       const storedImage = await getImage(img.id)
       if (storedImage?.dataUrl) {
-        restoredDraftImages.push({ ...img, dataUrl: storedImage.dataUrl })
+        restoredDraftImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl })
         cacheImage(img.id, storedImage.dataUrl)
       }
     }
@@ -2778,7 +2860,7 @@ function addTaskReferencedImageIds(target: Set<string>, task: TaskRecord) {
   for (const id of task.streamPartialImageIds || []) target.add(id)
 }
 
-async function storeTaskOutputImages(task: TaskRecord, images: string[]) {
+async function storeTaskOutputImages(task: TaskRecord, images: string[], rawImageUrls?: string[]) {
   const outputIds: string[] = []
   const outputDataUrls: string[] = []
   const outputImageSizes: Array<{ width?: number; height?: number }> = []
@@ -2786,7 +2868,7 @@ async function storeTaskOutputImages(task: TaskRecord, images: string[]) {
   const storedImageIds: string[] = []
 
   try {
-    for (const dataUrl of images) {
+    for (const [index, dataUrl] of images.entries()) {
       let outputDataUrl = dataUrl
       if (task.transparentOutput) {
         const original = await storeImageWithSize(dataUrl, 'generated')
@@ -2809,6 +2891,11 @@ async function storeTaskOutputImages(task: TaskRecord, images: string[]) {
       const stored = await storeImageWithSize(outputDataUrl, 'generated')
       storedImageIds.push(stored.id)
       cacheImage(stored.id, outputDataUrl)
+      const rawImageUrl = rawImageUrls?.[index]
+      if (rawImageUrl) {
+        const storedImage = await getImage(stored.id)
+        if (storedImage) await putImage({ ...storedImage, fileUrl: rawImageUrl })
+      }
       outputIds.push(stored.id)
       outputDataUrls.push(outputDataUrl)
       outputImageSizes.push(stored)
@@ -4303,17 +4390,32 @@ async function executeTask(taskId: string) {
   }
 
   try {
+    const shouldEnsurePlaygroundUrls = isBuiltInPlaygroundProfile(activeProfile) && task.inputImageIds.length > 0
     // 获取输入图片 data URLs
     const inputDataUrls: string[] = []
+    const inputImageUrls: string[] = []
     for (const imgId of task.inputImageIds) {
       const dataUrl = await ensureImageCached(imgId)
       if (!dataUrl) throw new Error('输入图片已不存在')
       inputDataUrls.push(dataUrl)
+      const inputImage = useStore.getState().inputImages.find((img) => img.id === imgId)
+      if (shouldEnsurePlaygroundUrls) {
+        inputImageUrls.push(await ensurePlaygroundInputImageUrl(imgId, inputImage))
+      } else if (inputImage?.fileUrl) {
+        inputImageUrls.push(inputImage.fileUrl)
+      }
     }
     let maskDataUrl: string | undefined
+    let maskUrl: string | undefined
     if (task.maskImageId) {
       maskDataUrl = await ensureImageCached(task.maskImageId)
       if (!maskDataUrl) throw new Error('遮罩图片已不存在')
+      const maskImage = useStore.getState().inputImages.find((img) => img.id === task.maskImageId)
+      if (shouldEnsurePlaygroundUrls) {
+        maskUrl = await ensurePlaygroundInputImageUrl(task.maskImageId, maskImage)
+      } else if (maskImage?.fileUrl) {
+        maskUrl = maskImage.fileUrl
+      }
     }
 
     const requestPrompt = task.transparentOutput && task.transparentPrompt
@@ -4325,7 +4427,9 @@ async function executeTask(taskId: string) {
       prompt: replaceImageMentionsForApi(requestPrompt, inputDataUrls.length),
       params: task.params,
       inputImageDataUrls: inputDataUrls,
+      inputImageUrls,
       maskDataUrl,
+      maskUrl,
       onFalRequestEnqueued: (request) => {
         falRequestInfo = request
         updateTaskInStore(taskId, {
@@ -4354,7 +4458,7 @@ async function executeTask(taskId: string) {
     }
 
     // 存储输出图片
-    const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images)
+    const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images, result.rawImageUrls)
     const isAsyncCustomTask = taskProvider !== 'fal' && taskProvider !== 'openai' && Boolean(customTaskInfo)
     const actualParamsList = await resolveImageSizeParamsList(
       outputDataUrls,
@@ -4789,19 +4893,32 @@ export async function reuseConfig(task: TaskRecord) {
 
 /** 编辑输出：将输出图加入输入 */
 export async function editOutputs(task: TaskRecord) {
-  const { inputImages, addInputImage, showToast } = useStore.getState()
+  const { addInputImage, updateInputImage, showToast } = useStore.getState()
   if (!task.outputImages?.length) return
 
   let added = 0
+  let updated = 0
   for (const imgId of task.outputImages) {
-    if (inputImages.find((i) => i.id === imgId)) continue
-    const dataUrl = await ensureImageCached(imgId)
-    if (dataUrl) {
-      addInputImage({ id: imgId, dataUrl })
-      added++
+    const existing = useStore.getState().inputImages.find((i) => i.id === imgId)
+    const storedImage = await getImage(imgId)
+    if (existing) {
+      if (!existing.fileUrl && storedImage?.fileUrl) {
+        updateInputImage(imgId, { fileUrl: storedImage.fileUrl })
+        updated++
+      }
+      continue
     }
+    const dataUrl = await ensureImageCached(imgId)
+    if (!dataUrl) continue
+    addInputImage({ id: imgId, dataUrl, fileUrl: storedImage?.fileUrl })
+    added++
   }
-  showToast(`已添加 ${added} 张输出图到输入`, 'success')
+  const message = updated > 0 && added === 0
+    ? `已更新 ${updated} 张输出图链接`
+    : updated > 0
+      ? `已添加 ${added} 张输出图到输入，并更新 ${updated} 张链接`
+      : `已添加 ${added} 张输出图到输入`
+  showToast(message, 'success')
 }
 
 /** 删除多条任务 */
@@ -4960,7 +5077,7 @@ async function completeRecoveredCustomTask(task: TaskRecord, result: Awaited<Ret
   const latest = useStore.getState().tasks.find((item) => item.id === task.id)
   if (!latest || latest.status === 'done') return
 
-  const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images)
+  const { outputIds, outputDataUrls, outputImageSizes, transparentOriginalImageIds } = await storeTaskOutputImages(task, result.images, result.rawImageUrls)
   const actualParamsList = await resolveImageSizeParamsList(outputDataUrls, undefined, outputImageSizes)
 
   updateTaskInStore(task.id, {
@@ -5200,7 +5317,81 @@ export async function createInputImageFromFile(file: File): Promise<InputImage |
   const dataUrl = await fileToDataUrl(file)
   const id = await storeImage(dataUrl, 'upload')
   cacheImage(id, dataUrl)
-  return { id, dataUrl }
+  const image: InputImage = { id, dataUrl, uploadStatus: 'signing', uploadError: null }
+
+  void uploadPlaygroundImageFile(file, {
+    onUploading: () => {
+      useStore.getState().updateInputImage(id, {
+        uploadStatus: 'uploading',
+        uploadError: null,
+      })
+    },
+  })
+    .then((fileUrl) => {
+      useStore.getState().updateInputImage(id, {
+        fileUrl,
+        uploadStatus: 'idle',
+        uploadError: null,
+      })
+      void getImage(id).then((stored) => {
+        if (!stored) return
+        void putImage({ ...stored, fileUrl })
+      })
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      const state = useStore.getState()
+      state.updateInputImage(id, { uploadStatus: 'error', uploadError: message })
+      state.showToast(`图片上传失败：${message}`, 'error')
+    })
+
+  return image
+}
+
+export async function retryInputImageUpload(imageId: string): Promise<void> {
+  const state = useStore.getState()
+  const target = state.inputImages.find((img) => img.id === imageId)
+  if (!target?.dataUrl) throw new Error('图片已不存在')
+
+  state.updateInputImage(imageId, {
+    uploadStatus: 'signing',
+    uploadError: null,
+  })
+
+  const blob = await validateRetryUploadImageBlob(target.dataUrl)
+  const file = new File([blob], `${imageId}.png`, { type: blob.type || 'image/png' })
+
+  try {
+    const fileUrl = await uploadPlaygroundImageFile(file, {
+      onUploading: () => {
+        useStore.getState().updateInputImage(imageId, {
+          uploadStatus: 'uploading',
+          uploadError: null,
+        })
+      },
+    })
+    useStore.getState().updateInputImage(imageId, {
+      fileUrl,
+      uploadStatus: 'idle',
+      uploadError: null,
+    })
+    const stored = await getImage(imageId)
+    if (stored) await putImage({ ...stored, fileUrl })
+    useStore.getState().showToast('图片上传成功', 'success')
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    useStore.getState().updateInputImage(imageId, {
+      uploadStatus: 'error',
+      uploadError: message,
+    })
+    throw err instanceof Error ? err : new Error(message)
+  }
+}
+
+async function validateRetryUploadImageBlob(dataUrl: string): Promise<Blob> {
+  const blob = await dataUrlToBlob(dataUrl)
+  if (!blob.type.startsWith('image/')) throw new Error('不是有效的图片')
+  return blob
 }
 
 /** 添加图片到输入（右键菜单）—— 支持 data/blob/http URL */

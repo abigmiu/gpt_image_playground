@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
+import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, retryInputImageUpload, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { getActiveApiProfile, getAgentImageApiProfile, normalizeSettings } from '../lib/apiProfiles'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
@@ -710,7 +710,9 @@ export default function InputBar() {
       ? settings
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, settingsActiveProfile.id, settings])
+  const hasUploadingImages = inputImages.some((img) => img.uploadStatus === 'signing' || img.uploadStatus === 'uploading')
   const canSubmit = Boolean(prompt.trim() && !activeAgentIsRunning)
+  const shouldHighlightSubmit = canSubmit && !hasUploadingImages
   const submitButtonAriaLabel = activeAgentIsRunning
     ? '停止生成'
     : maskDraft ? '遮罩编辑' : '生成图像'
@@ -1623,6 +1625,14 @@ export default function InputBar() {
     const isLast = idx === inputImages.length - 1
     const showDropBefore = imageDragOverIndex === idx && imageDragIndex !== idx
     const showDropAfter = imageDragOverIndex === inputImages.length && isLast && imageDragIndex !== idx
+    const isUploading = img.uploadStatus === 'signing' || img.uploadStatus === 'uploading'
+    const uploadLabel = img.uploadStatus === 'signing'
+      ? '签名中'
+      : img.uploadStatus === 'uploading'
+        ? '上传中'
+        : img.uploadStatus === 'error'
+          ? '上传失败'
+          : ''
 
     const handleDragStart = (e: React.DragEvent) => {
       if (isMaskTarget) {
@@ -1799,10 +1809,41 @@ export default function InputBar() {
               />
             </div>
           )}
+          {isUploading && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 bg-black/55 backdrop-blur-[1px] pointer-events-none">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" />
+              <span className="text-[9px] leading-none font-medium text-white">
+                {uploadLabel}
+              </span>
+            </div>
+          )}
           {isMaskTarget && (
             <span className="absolute left-1 top-1 rounded bg-blue-500/90 px-1.5 py-0.5 text-[8px] leading-none text-white font-bold tracking-wider backdrop-blur-sm z-10 pointer-events-none">
               MASK
             </span>
+          )}
+          {uploadLabel && (
+            <span className={`absolute right-1 top-1 rounded px-1.5 py-0.5 text-[8px] leading-none text-white z-10 pointer-events-none ${
+              img.uploadStatus === 'error' ? 'bg-red-500/90' : 'bg-black/65'
+            }`}>
+              {uploadLabel}
+            </span>
+          )}
+          {img.uploadStatus === 'error' && (
+            <button
+              className="absolute left-1 top-1 z-20 rounded bg-white/92 px-1.5 py-0.5 text-[8px] leading-none text-gray-900 shadow-sm transition hover:bg-white"
+              onClick={async (e) => {
+                e.stopPropagation()
+                try {
+                  await retryInputImageUpload(img.id)
+                } catch (err) {
+                  showToast(`图片上传失败：${err instanceof Error ? err.message : String(err)}`, 'error')
+                }
+              }}
+              title={img.uploadError || '重试上传'}
+            >
+              重试
+            </button>
           )}
           <span className="absolute bottom-1 left-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/55 text-[9px] font-semibold text-white backdrop-blur-sm z-10 pointer-events-none">
             {idx + 1}
@@ -2126,11 +2167,11 @@ export default function InputBar() {
                   <ButtonTooltip visible={activeAgentIsRunning && submitHover} text={submitTooltipText} />
                   <button
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : submitCurrentMode()}
-                    disabled={activeAgentIsRunning ? false : !canSubmit}
+                    disabled={activeAgentIsRunning ? false : !shouldHighlightSubmit}
                     className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
                       activeAgentIsRunning
                         ? 'bg-red-500 text-white hover:bg-red-600'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:text-gray-500 dark:disabled:text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                     aria-label={submitButtonAriaLabel}
                   >
@@ -2231,12 +2272,12 @@ export default function InputBar() {
                   <ButtonTooltip visible={activeAgentIsRunning && submitHover} text={submitTooltipText} />
                   <button
                     onClick={() => activeAgentIsRunning ? stopActiveAgentResponse() : submitCurrentMode()}
-                    disabled={activeAgentIsRunning ? false : !canSubmit}
+                    disabled={activeAgentIsRunning ? false : !shouldHighlightSubmit}
                     aria-label={submitButtonAriaLabel}
                     className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm ${
                       activeAgentIsRunning
                         ? 'bg-red-500 text-white hover:bg-red-600'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
+                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:text-gray-500 dark:disabled:text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed'
                     }`}
                   >
                     {activeAgentIsRunning ? (

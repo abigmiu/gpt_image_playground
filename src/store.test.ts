@@ -83,6 +83,10 @@ vi.mock('./lib/api', () => ({
     revisedPrompts: [],
   })),
 }))
+vi.mock('./lib/sub2apiPlaygroundUpload', () => ({
+  uploadPlaygroundImageFile: vi.fn(async () => 'https://cdn.example.com/reuploaded.png'),
+  canAccessPlaygroundImageUrl: vi.fn(async () => true),
+}))
 vi.mock('./lib/falAiImageApi', () => ({
   getFalErrorMessage: vi.fn((err: unknown) => err instanceof Error ? err.message : String(err)),
   getFalQueuedImageResult: vi.fn(async () => ({
@@ -130,6 +134,7 @@ vi.mock('./lib/agentApi', () => ({
 import { clearAgentConversations, clearImages, clearTasks, getAllAgentConversations, getAllTasks, getImage, putAgentConversation, putImage, putTask as putDbTask } from './lib/db'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
+import { canAccessPlaygroundImageUrl, uploadPlaygroundImageFile } from './lib/sub2apiPlaygroundUpload'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
 import { cleanStaleAgentInputDrafts, clearFailedTasks, deleteAgentRoundFromConversation, deleteFavoriteCollection, editOutputs, getActiveAgentRounds, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, markInterruptedOpenAIRunningTasks, migratePersistedState, regenerateAgentAssistantMessage, remapAgentRoundMentionsForPathChange, removeTask, reuseConfig, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
 
@@ -272,6 +277,29 @@ describe('mask draft lifecycle in store actions', () => {
     expect(useStore.getState().maskDraft).toEqual(maskDraft)
   })
 
+  it('fills fileUrl for an existing input image when edit-output reuses the same image', async () => {
+    await putImage({ id: imageA.id, dataUrl: imageA.dataUrl, fileUrl: 'https://cdn.example.com/a.png' })
+    useStore.setState({
+      inputImages: [imageA],
+    })
+
+    await editOutputs(task({ outputImages: [imageA.id] }))
+
+    expect(useStore.getState().inputImages[0]?.fileUrl).toBe('https://cdn.example.com/a.png')
+  })
+
+  it('persists fileUrl in gallery input draft state', () => {
+    useStore.setState({
+      appMode: 'gallery',
+      inputImages: [{ ...imageA, fileUrl: 'https://cdn.example.com/a.png' }],
+    })
+
+    const persisted = getPersistedState(useStore.getState())
+
+    expect(persisted.inputImages).toEqual([{ id: imageA.id, dataUrl: '', fileUrl: 'https://cdn.example.com/a.png' }])
+    expect(persisted.galleryInputDraft?.inputImages).toEqual([{ id: imageA.id, dataUrl: '', fileUrl: 'https://cdn.example.com/a.png' }])
+  })
+
   it('clears an invalid mask draft when submit cannot find the mask target image', async () => {
     useStore.setState({
       inputImages: [imageA],
@@ -293,6 +321,26 @@ describe('mask draft lifecycle in store actions', () => {
     const state = useStore.getState()
     expect(state.tasks).toHaveLength(1)
     expect(state.showToast).toHaveBeenCalledWith('任务已提交', 'success')
+  })
+
+  it('reuploads expired playground edit input urls before submit', async () => {
+    const { callImageApi } = await import('./lib/api')
+    vi.mocked(callImageApi).mockClear()
+    vi.mocked(canAccessPlaygroundImageUrl).mockResolvedValueOnce(false)
+    vi.mocked(uploadPlaygroundImageFile).mockResolvedValueOnce('https://cdn.example.com/reuploaded.png')
+    useStore.setState({
+      settings: { ...DEFAULT_SETTINGS },
+      prompt: 'edit prompt',
+      inputImages: [{ ...imageA, fileUrl: 'https://cdn.example.com/expired.png' }],
+      params: { ...DEFAULT_PARAMS },
+    })
+
+    await submitTask()
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(uploadPlaygroundImageFile).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(callImageApi).mock.calls[0]?.[0].inputImageUrls).toEqual(['https://cdn.example.com/reuploaded.png'])
+    expect(useStore.getState().inputImages[0]?.fileUrl).toBe('https://cdn.example.com/reuploaded.png')
   })
 
   it('stores decoded image size as actual size when the API omits size', async () => {

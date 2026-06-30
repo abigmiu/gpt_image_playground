@@ -148,6 +148,12 @@ export interface InputImage {
   id: string
   /** data URL，用于预览 */
   dataUrl: string
+  /** 远端可复用图片 URL，用于编辑等场景避免重复上传 */
+  fileUrl?: string
+  /** 当前上传状态 */
+  uploadStatus?: 'idle' | 'signing' | 'uploading' | 'error'
+  /** 上传失败信息 */
+  uploadError?: string | null
 }
 
 export interface MaskDraft {
@@ -294,6 +300,7 @@ export interface AgentConversation {
 export interface StoredImage {
   id: string
   dataUrl: string
+  fileUrl?: string
   /** 图片首次存储时间（ms） */
   createdAt?: number
   /** 图片来源：用户上传 / API 生成 / 遮罩 */
