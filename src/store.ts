@@ -878,7 +878,9 @@ interface AppState {
   sub2ApiPaymentModalTab: Sub2ApiPaymentModalTab
   setShowSub2ApiPaymentModal: (show: boolean, tab?: Sub2ApiPaymentModalTab) => void
   showAnnouncementCenter: boolean
+  announcementUnreadCount: number
   setShowAnnouncementCenter: (show: boolean) => void
+  setAnnouncementUnreadCount: (count: number) => void
   supportPromptOpen: boolean
   supportPromptDismissed: boolean
   supportPromptSkippedForImportedData: boolean
@@ -1537,9 +1539,13 @@ export const useStore = create<AppState>()(
         })
       },
       showAnnouncementCenter: false,
+      announcementUnreadCount: 0,
       setShowAnnouncementCenter: (showAnnouncementCenter) => {
         if (showAnnouncementCenter) dismissAllTooltips()
         set({ showAnnouncementCenter })
+      },
+      setAnnouncementUnreadCount: (announcementUnreadCount) => {
+        set({ announcementUnreadCount: Math.max(0, announcementUnreadCount) })
       },
       supportPromptOpen: false,
       supportPromptDismissed: false,

@@ -17,6 +17,7 @@ import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
 import Sub2ApiPaymentModal from './components/Sub2ApiPaymentModal'
 import Sub2ApiOrdersModal from './components/Sub2ApiOrdersModal'
+import Sub2ApiUsageModal from './components/Sub2ApiUsageModal'
 import Sub2ApiAnnouncementModal from './components/Sub2ApiAnnouncementModal'
 import Sub2ApiAnnouncementCenterModal from './components/Sub2ApiAnnouncementCenterModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
@@ -82,6 +83,9 @@ export default function App() {
       ) : null}
       {showSub2ApiPaymentModal && sub2ApiPaymentModalTab === 'orders' ? (
         <Sub2ApiOrdersModal onClose={() => setShowSub2ApiPaymentModal(false)} />
+      ) : null}
+      {showSub2ApiPaymentModal && sub2ApiPaymentModalTab === 'usage' ? (
+        <Sub2ApiUsageModal onClose={() => setShowSub2ApiPaymentModal(false)} />
       ) : null}
       {showAnnouncementCenter ? (
         <Sub2ApiAnnouncementCenterModal

@@ -26,6 +26,8 @@ export default function Header() {
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const setShowAnnouncementCenter = useStore((s) => s.setShowAnnouncementCenter)
+  const announcementUnreadCount = useStore((s) => s.announcementUnreadCount)
+  const setAnnouncementUnreadCount = useStore((s) => s.setAnnouncementUnreadCount)
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const favoriteCollectionTitle = useFavoriteCollectionTitle()
@@ -40,7 +42,6 @@ export default function Header() {
   const [showHeaderMenu, setShowHeaderMenu] = useState(false)
   const [authUser, setAuthUser] = useState<Sub2ApiCurrentUser | null>(null)
   const [authReady, setAuthReady] = useState(false)
-  const [announcementUnreadCount, setAnnouncementUnreadCount] = useState(0)
   const showToast = useStore((s) => s.showToast)
   const headerMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -160,7 +161,7 @@ export default function Header() {
       cancelled = true
       unsubscribe()
     }
-  }, [])
+  }, [setAnnouncementUnreadCount])
 
   useEffect(() => {
     if (!showHeaderMenu) return
@@ -184,6 +185,11 @@ export default function Header() {
   const openOrders = () => {
     dismissAllTooltips()
     setShowSub2ApiPaymentModal(true, 'orders')
+  }
+
+  const openUsage = () => {
+    dismissAllTooltips()
+    setShowSub2ApiPaymentModal(true, 'usage')
   }
 
   const openAnnouncements = () => {
@@ -285,6 +291,16 @@ export default function Header() {
                   >
                     我的订单
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeaderMenu(false)
+                      setShowSub2ApiPaymentModal(true, 'usage')
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                  >
+                    使用记录
+                  </button>
                 </div>
               ) : null}
             </div>
@@ -302,6 +318,13 @@ export default function Header() {
                 className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
               >
                 我的订单
+              </button>
+              <button
+                type="button"
+                onClick={openUsage}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+              >
+                使用记录
               </button>
               <button
                 type="button"

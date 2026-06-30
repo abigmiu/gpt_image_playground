@@ -5,6 +5,7 @@ import { useStore } from '../store'
 
 export function useSub2ApiAnnouncementGate() {
   const showToast = useStore((s) => s.showToast)
+  const setAnnouncementUnreadCount = useStore((s) => s.setAnnouncementUnreadCount)
   const [currentAnnouncement, setCurrentAnnouncement] = useState<Sub2ApiAnnouncement | null>(null)
   const [announcements, setAnnouncements] = useState<Sub2ApiAnnouncement[]>([])
   const [loadingAnnouncements, setLoadingAnnouncements] = useState(false)
@@ -22,6 +23,7 @@ export function useSub2ApiAnnouncementGate() {
         if (!disposed && token === requestTokenRef.current) {
           setCurrentAnnouncement(null)
           setAnnouncements([])
+          setAnnouncementUnreadCount(0)
           setMarkingRead(false)
           setLoadingAnnouncements(false)
         }
@@ -33,6 +35,7 @@ export function useSub2ApiAnnouncementGate() {
         const nextAnnouncements = await listSub2ApiAnnouncements(unreadOnly)
         if (disposed || token !== requestTokenRef.current) return
         setAnnouncements(nextAnnouncements)
+        setAnnouncementUnreadCount(nextAnnouncements.filter((item) => !item.read_at).length)
         const nextAnnouncement = nextAnnouncements.find((item) => item.notify_mode === 'popup' && !item.read_at) ?? null
         setCurrentAnnouncement(nextAnnouncement)
         setMarkingRead(false)
@@ -40,6 +43,7 @@ export function useSub2ApiAnnouncementGate() {
         if (disposed || token !== requestTokenRef.current) return
         setCurrentAnnouncement(null)
         setAnnouncements([])
+        setAnnouncementUnreadCount(0)
         setMarkingRead(false)
         showToast(error instanceof Error ? error.message : String(error), 'error')
       } finally {
@@ -58,24 +62,27 @@ export function useSub2ApiAnnouncementGate() {
       disposed = true
       unsubscribe()
     }
-  }, [showToast])
+  }, [setAnnouncementUnreadCount, showToast])
 
   const refreshAnnouncements = async (unreadOnly = false) => {
     const session = getSub2ApiAuthSession()
     if (!session?.accessToken) {
       setAnnouncements([])
       setCurrentAnnouncement(null)
+      setAnnouncementUnreadCount(0)
       return
     }
     setLoadingAnnouncements(true)
     try {
       const nextAnnouncements = await listSub2ApiAnnouncements(unreadOnly)
       setAnnouncements(nextAnnouncements)
+      setAnnouncementUnreadCount(nextAnnouncements.filter((item) => !item.read_at).length)
       const nextAnnouncement = nextAnnouncements.find((item) => item.notify_mode === 'popup' && !item.read_at) ?? null
       setCurrentAnnouncement(nextAnnouncement)
     } catch (error) {
       setAnnouncements([])
       setCurrentAnnouncement(null)
+      setAnnouncementUnreadCount(0)
       showToast(error instanceof Error ? error.message : String(error), 'error')
     } finally {
       setLoadingAnnouncements(false)
@@ -97,11 +104,16 @@ export function useSub2ApiAnnouncementGate() {
 
   const markAnnouncementRead = async (id: number) => {
     await markSub2ApiAnnouncementRead(id)
-    setAnnouncements((current) => current.map((item) => (
-      item.id === id ? { ...item, read_at: new Date().toISOString() } : item
-    )))
+    const readAt = new Date().toISOString()
+    setAnnouncements((current) => {
+      const next = current.map((item) => (
+        item.id === id ? { ...item, read_at: readAt } : item
+      ))
+      setAnnouncementUnreadCount(next.filter((item) => !item.read_at).length)
+      return next
+    })
     setCurrentAnnouncement((current) => (
-      current?.id === id ? { ...current, read_at: new Date().toISOString() } : current
+      current?.id === id ? { ...current, read_at: readAt } : current
     ))
   }
 
