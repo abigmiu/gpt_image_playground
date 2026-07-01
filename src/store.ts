@@ -5402,5 +5402,32 @@ export async function addImageFromUrl(src: string): Promise<void> {
   const dataUrl = await blobToDataUrl(blob)
   const id = await storeImage(dataUrl, 'upload')
   cacheImage(id, dataUrl)
-  useStore.getState().addInputImage({ id, dataUrl })
+  const file = new File([blob], `${id}.png`, { type: blob.type || 'image/png' })
+  useStore.getState().addInputImage({ id, dataUrl, uploadStatus: 'signing', uploadError: null })
+
+  void uploadPlaygroundImageFile(file, {
+    onUploading: () => {
+      useStore.getState().updateInputImage(id, {
+        uploadStatus: 'uploading',
+        uploadError: null,
+      })
+    },
+  })
+    .then((fileUrl) => {
+      useStore.getState().updateInputImage(id, {
+        fileUrl,
+        uploadStatus: 'idle',
+        uploadError: null,
+      })
+      void getImage(id).then((stored) => {
+        if (!stored) return
+        void putImage({ ...stored, fileUrl })
+      })
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
+      const state = useStore.getState()
+      state.updateInputImage(id, { uploadStatus: 'error', uploadError: message })
+      state.showToast(`图片上传失败：${message}`, 'error')
+    })
 }
