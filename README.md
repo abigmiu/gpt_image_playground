@@ -220,6 +220,44 @@ $env:VITE_DEFAULT_API_URL="https://api.openai.com/v1"; npm run deploy:cf
 
 官方镜像已发布至 GitHub Container Registry。Docker 部署支持在运行时注入默认配置。
 
+> ⚠️ **与 Sub2API 联动部署说明**：本项目在与 `sub2api` 联动时，并不只是把图片生成请求转发到 OpenAI 兼容接口。前端默认会直接使用同源的 `/api/v1/playground` 作为基础地址，并额外调用同源的 `sub2api` 接口完成登录态、Token 刷新、上传预签名与上传完成确认等流程：
+>
+> - `/api/v1/auth/*`
+> - `/api/v1/settings/public`
+> - `/api/v1/playground/*`
+>
+> 因此在 `1Panel`、Nginx、宝塔等面板里，**不能把 `playground` 和 `sub2api` 分成两个完全独立的域名然后只在前端里填一个 API 地址**。正确做法是：
+>
+> - 页面主站点继续指向 `gpt-image-playground` 容器
+> - 同一域名下的 `/api/v1/` 与 `/api/v1/playground/` 反向代理到 `sub2api`
+>
+> 一个常见的同域部署拓扑如下：
+>
+> ```nginx
+> server {
+>     server_name your-domain.example.com;
+>
+>     location / {
+>         proxy_pass http://127.0.0.1:3000;
+>     }
+>
+>     location /api/v1/ {
+>         proxy_pass http://127.0.0.1:8080;
+>     }
+>
+>     location /api/v1/playground/ {
+>         proxy_pass http://127.0.0.1:8080;
+>     }
+> }
+> ```
+>
+> 其中：
+>
+> - `127.0.0.1:3000` 是 `gpt-image-playground` 容器映射出来的端口（容器内通常是 `80`）
+> - `127.0.0.1:8080` 是 `sub2api` 容器映射出来的端口（容器内通常是 `8080`）
+>
+> 若你按上面方式部署，`DEFAULT_API_URL` 通常应保持默认值 `/api/v1/playground`，或者显式填为 `https://你的域名/api/v1/playground`。不要把它改成另一个独立域名，否则登录、上传和部分联动能力会失效。
+
 **环境变量说明：**
 
 - `DEFAULT_API_URL`：设置页面上默认显示的 API 地址（如 `https://api.openai.com/v1`）。也支持填写 `.json` 配置 URL 或带 `settings` 参数的分享 URL 来导入自定义服务商配置（详见下方说明）。

@@ -6,6 +6,7 @@ import ViewportTooltip from './ViewportTooltip'
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
 const SIZE_LIMIT_TEXT = '由于模型限制，最终输出会自动规整到合法尺寸：\n宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。'
 const RATIOS = [
+  { label: 'Auto', value: 'auto' },
   { label: '1:1', value: '1:1' },
   { label: '3:2', value: '3:2' },
   { label: '2:3', value: '2:3' },
@@ -23,7 +24,7 @@ interface Props {
   allowAuto?: boolean
 }
 
-type Mode = 'auto' | 'ratio' | 'resolution'
+type Mode = 'ratio' | 'resolution'
 
 function parseSize(size: string) {
   const match = size.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
@@ -72,14 +73,14 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   const currentPreset = findPresetForSize(currentSize)
   const currentParsedSize = parseSize(currentSize)
   const [mode, setMode] = useState<Mode>(() => {
-    if (!currentSize || currentSize === 'auto') return allowAuto ? 'auto' : 'ratio'
+    if (!currentSize || currentSize === 'auto') return 'ratio'
     if (currentPreset) return 'ratio'
     return 'resolution'
   })
 
   // Ratio mode state
   const [tier, setTier] = useState<SizeTier>(currentPreset?.tier ?? '1K')
-  const [ratio, setRatio] = useState(currentPreset?.ratio ?? (allowAuto ? '1:1' : '4:3'))
+  const [ratio, setRatio] = useState(currentSize === 'auto' && allowAuto ? 'auto' : (currentPreset?.ratio ?? (allowAuto ? '1:1' : '4:3')))
   const [customRatio, setCustomRatio] = useState('16:9')
 
   // Resolution mode state
@@ -103,13 +104,12 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   )
 
   const previewSize = useMemo(() => {
-    if (mode === 'auto') return 'auto'
-    
     if (mode === 'ratio') {
+      if (ratio === 'auto') return 'auto'
       const size = calculateImageSize(tier, activeRatio)
       return size ? normalizeImageSize(size) : ''
     }
-    
+
     if (mode === 'resolution') {
       const w = parseInt(customW, 10)
       const h = parseInt(customH, 10)
@@ -118,7 +118,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
       }
       return ''
     }
-    
+
     return ''
   }, [mode, tier, activeRatio, customW, customH])
 
@@ -196,14 +196,6 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
 
         <div className="space-y-6">
           <div className="flex rounded-xl bg-gray-100/80 p-1 dark:bg-white/[0.04]">
-            {allowAuto && (
-              <button
-                onClick={() => setMode('auto')}
-                className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition ${mode === 'auto' ? 'bg-white text-gray-800 shadow-sm dark:bg-gray-700 dark:text-gray-100' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
-              >
-                自动
-              </button>
-            )}
             <button
               onClick={() => setMode('ratio')}
               className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition ${mode === 'ratio' ? 'bg-white text-gray-800 shadow-sm dark:bg-gray-700 dark:text-gray-100' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
@@ -219,24 +211,6 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
           </div>
 
           <div className="h-[380px] max-h-[55vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-white/10 pr-1 -mr-1 pb-2">
-            {mode === 'auto' && (
-              <div className="flex h-full animate-fade-in items-center justify-center pt-8 pb-4 text-center">
-                <div>
-                  <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-blue-500 dark:bg-blue-500/10">
-                    <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
-                  <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">自动尺寸</h4>
-                  <p className="mt-2 text-xs text-gray-400 leading-relaxed dark:text-gray-500">
-                    不向模型传递具体的分辨率参数
-                    <br />
-                    由模型自己决定生成尺寸
-                  </p>
-                </div>
-              </div>
-            )}
-
             {mode === 'ratio' && (
               <div className="space-y-5 animate-fade-in">
                 <section>
@@ -254,6 +228,18 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                   <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">图像比例</div>
                   <div className="grid grid-cols-4 gap-2">
                     {RATIOS.map((item) => {
+                      if (item.value === 'auto') {
+                        if (!allowAuto) return null
+                        return (
+                          <button
+                            key={item.value}
+                            className={`${buttonClass(ratio === item.value)} col-span-4`}
+                            onClick={() => setRatio(item.value)}
+                          >
+                            Auto
+                          </button>
+                        )
+                      }
                       const [w, h] = item.value.split(':').map(Number)
                       const isHorizontal = w > h
                       const isSquare = w === h
@@ -281,6 +267,12 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                     </button>
                   </div>
                 </section>
+
+                {ratio === 'auto' && (
+                  <div className="rounded-xl border border-gray-200/80 bg-gray-50/80 p-3 text-xs text-gray-600 dark:border-white/[0.05] dark:bg-white/[0.02] dark:text-gray-400">
+                    不向模型传递具体分辨率，由模型自己决定生成尺寸
+                  </div>
+                )}
 
                 {ratio === 'custom' && (
                   <label className="block animate-fade-in">
