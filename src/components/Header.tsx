@@ -2,7 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
-import { clearSub2ApiAuthSession, getSub2ApiAuthSession, getSub2ApiCurrentUser, getSub2ApiUserDisplayName, logoutSub2Api, subscribeSub2ApiAuthChange, type Sub2ApiCurrentUser } from '../lib/sub2apiAuth'
+import {
+  clearSub2ApiAuthSession,
+  getSub2ApiAuthSession,
+  getSub2ApiCurrentUser,
+  getSub2ApiUserDisplayName,
+  logoutSub2Api,
+  subscribeSub2ApiAuthChange,
+  subscribeSub2ApiCurrentUserRefresh,
+  type Sub2ApiCurrentUser,
+} from '../lib/sub2apiAuth'
 import { listSub2ApiAnnouncements } from '../lib/sub2apiAnnouncements'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
@@ -18,6 +27,10 @@ type BeforeInstallPromptEvent = Event & {
 function isInstalledPwa() {
   const nav = window.navigator as Navigator & { standalone?: boolean }
   return window.matchMedia('(display-mode: standalone)').matches || nav.standalone === true
+}
+
+function formatBalance(balance: number) {
+  return `$${balance.toFixed(2)}`
 }
 
 export default function Header() {
@@ -97,39 +110,73 @@ export default function Header() {
 
   useEffect(() => {
     let cancelled = false
+    let refreshPromise: Promise<void> | null = null
+    let queuedRefresh = false
 
     const syncAuthUser = async () => {
-      const session = getSub2ApiAuthSession()
-      if (!session?.accessToken) {
-        if (!cancelled) {
-          setAuthUser(null)
-          setAnnouncementUnreadCount(0)
-          setAuthReady(true)
-        }
-        return
+      if (refreshPromise) {
+        queuedRefresh = true
+        return refreshPromise
       }
 
+      refreshPromise = (async () => {
+        const session = getSub2ApiAuthSession()
+        if (!session?.accessToken) {
+          if (!cancelled) {
+            setAuthUser(null)
+            setAnnouncementUnreadCount(0)
+            setAuthReady(true)
+          }
+          return
+        }
+
+        try {
+          const user = await getSub2ApiCurrentUser()
+          if (cancelled) return
+          setAuthUser(user)
+        } catch {
+          if (cancelled) return
+          clearSub2ApiAuthSession()
+          setAuthUser(null)
+        } finally {
+          if (!cancelled) setAuthReady(true)
+        }
+      })()
+
       try {
-        const user = await getSub2ApiCurrentUser()
-        if (cancelled) return
-        setAuthUser(user)
-      } catch {
-        if (cancelled) return
-        clearSub2ApiAuthSession()
-        setAuthUser(null)
+        await refreshPromise
       } finally {
-        if (!cancelled) setAuthReady(true)
+        refreshPromise = null
+        if (queuedRefresh && !cancelled) {
+          queuedRefresh = false
+          void syncAuthUser()
+        }
       }
     }
 
     void syncAuthUser()
-    const unsubscribe = subscribeSub2ApiAuthChange(() => {
+    const unsubscribeAuth = subscribeSub2ApiAuthChange(() => {
       void syncAuthUser()
     })
+    const unsubscribeRefresh = subscribeSub2ApiCurrentUserRefresh(() => {
+      void syncAuthUser()
+    })
+    const intervalId = window.setInterval(() => {
+      if (document.hidden) return
+      void syncAuthUser()
+    }, 60_000)
+    const handleVisibilityChange = () => {
+      if (document.hidden) return
+      void syncAuthUser()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       cancelled = true
-      unsubscribe()
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      unsubscribeAuth()
+      unsubscribeRefresh()
     }
   }, [])
 
@@ -174,6 +221,7 @@ export default function Header() {
   }, [showHeaderMenu])
 
   const authDisplayName = getSub2ApiUserDisplayName(authUser)
+  const authBalance = typeof authUser?.balance === 'number' ? formatBalance(authUser.balance) : ''
 
   const openRecharge = () => {
     dismissAllTooltips()
@@ -424,10 +472,15 @@ export default function Header() {
               <div className="relative group">
                 <button
                   type="button"
-                  className="max-w-[180px] truncate px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors text-sm text-gray-600 dark:text-gray-400"
-                  aria-label={authDisplayName}
+                  className="flex max-w-[220px] items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-900 transition-colors text-sm text-gray-600 dark:text-gray-400"
+                  aria-label={authBalance ? `${authDisplayName}，余额 ${authBalance}` : authDisplayName}
                 >
-                  {authDisplayName}
+                  <span className="min-w-0 truncate">{authDisplayName}</span>
+                  {authBalance ? (
+                    <span className="shrink-0 text-xs text-gray-500 dark:text-gray-500">
+                      {authBalance}
+                    </span>
+                  ) : null}
                 </button>
                 <div className="invisible absolute right-0 top-full z-50 mt-1 min-w-[120px] overflow-hidden rounded-xl border border-gray-200/70 bg-white/95 p-1 opacity-0 shadow-xl ring-1 ring-black/5 transition-all group-hover:visible group-hover:opacity-100 dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
                   <button

@@ -57,6 +57,7 @@ import { createTransparentOutputMeta, getTransparentRequestParams, removeKeyedBa
 import { blobToDataUrl, fileToDataUrl } from './lib/dataUrl'
 import { formatExportFileTime } from './lib/exportFileName'
 import { buildExportZip, readExportZip, readExportZipFileAsDataUrl } from './lib/exportZip'
+import { requestSub2ApiCurrentUserRefresh } from './lib/sub2apiAuth'
 import { canAccessPlaygroundImageUrl, uploadPlaygroundImageFile } from './lib/sub2apiPlaygroundUpload'
 
 export const ALL_FAVORITES_COLLECTION_ID = '__all_favorites__'
@@ -4524,6 +4525,9 @@ async function executeTask(taskId: string) {
     const completionMessage = failedCount > 0
       ? `生成完成：成功 ${outputIds.length} 张，失败 ${failedCount} 张`
       : `生成完成，共 ${outputIds.length} 张图片`
+    if (isBuiltInPlaygroundProfile(activeProfile)) {
+      requestSub2ApiCurrentUserRefresh()
+    }
     useStore.getState().showToast(completionMessage, failedCount > 0 ? 'error' : 'success')
     if (!isAgentTask(task)) showTaskCompletionNotification('图像生成完成', `${completionMessage}。`)
     const currentMask = useStore.getState().maskDraft
@@ -5092,6 +5096,18 @@ async function completeRecoveredCustomTask(task: TaskRecord, result: Awaited<Ret
     finishedAt: Date.now(),
     elapsed: Date.now() - task.createdAt,
   })
+  const profile = getCustomRecoveryProfile(useStore.getState().settings, task)
+  if (
+    profile &&
+    task.apiProvider === 'openai' &&
+    profile.id === DEFAULT_OPENAI_PROFILE_ID &&
+    profile.provider === 'openai' &&
+    profile.apiMode === 'images' &&
+    !profile.apiKey.trim() &&
+    profile.baseUrl.replace(/\/+$/, '').endsWith('/api/v1/playground')
+  ) {
+    requestSub2ApiCurrentUserRefresh()
+  }
   useStore.getState().showToast(`自定义异步任务已恢复，共 ${outputIds.length} 张图片`, 'success')
   if (!isAgentTask(task)) showTaskCompletionNotification('图像生成完成', `自定义异步任务已恢复，共 ${outputIds.length} 张图片。`)
 }

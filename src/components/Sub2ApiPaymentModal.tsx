@@ -20,6 +20,7 @@ import {
   type PaymentOrder,
   type PaymentRecoverySnapshot,
 } from '../lib/sub2apiPayment'
+import { requestSub2ApiCurrentUserRefresh } from '../lib/sub2apiAuth'
 import Sub2ApiPaymentStatus from './Sub2ApiPaymentStatus'
 
 interface Sub2ApiPaymentModalProps {
@@ -351,6 +352,7 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
 
   const onPaymentSuccess = (_order: PaymentOrder) => {
     removeRecoverySnapshot()
+    requestSub2ApiCurrentUserRefresh()
   }
 
   const onPaymentSettled = () => {

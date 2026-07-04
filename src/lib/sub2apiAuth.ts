@@ -18,6 +18,7 @@ export interface Sub2ApiCurrentUser {
   username?: string
   nickname?: string
   display_name?: string
+  balance?: number
 }
 
 interface Sub2ApiEnvelope<T> {
@@ -44,6 +45,7 @@ interface RefreshTokenResponse {
 
 const STORAGE_KEY = 'sub2api-auth-session'
 const AUTH_CHANGE_EVENT = 'sub2api-auth-change'
+const CURRENT_USER_REFRESH_EVENT = 'sub2api-current-user-refresh'
 const AUTH_API_PREFIX = '/api/v1'
 const PLAYGROUND_API_PREFIX = '/api/v1/playground'
 
@@ -94,6 +96,17 @@ export function subscribeSub2ApiAuthChange(callback: () => void) {
   if (typeof window === 'undefined') return () => {}
   window.addEventListener(AUTH_CHANGE_EVENT, callback)
   return () => window.removeEventListener(AUTH_CHANGE_EVENT, callback)
+}
+
+export function requestSub2ApiCurrentUserRefresh() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event(CURRENT_USER_REFRESH_EVENT))
+}
+
+export function subscribeSub2ApiCurrentUserRefresh(callback: () => void) {
+  if (typeof window === 'undefined') return () => {}
+  window.addEventListener(CURRENT_USER_REFRESH_EVENT, callback)
+  return () => window.removeEventListener(CURRENT_USER_REFRESH_EVENT, callback)
 }
 
 function buildAuthUrl(path: string): string {
