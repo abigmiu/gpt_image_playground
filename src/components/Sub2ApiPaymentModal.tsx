@@ -513,11 +513,11 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
                     </div>
                   ) : null}
                   <div className={`flex items-center justify-between gap-4 ${feeRate > 0 ? '' : 'border-t border-gray-200 pt-2 dark:border-white/[0.08]'}`}>
-                    <span className="text-gray-500 dark:text-gray-400">到账余额</span>
-                    <span className="text-gray-900 dark:text-white">${creditedAmount.toFixed(2)}</span>
+                    <span className="text-gray-500 dark:text-gray-400">到账点数</span>
+                    <span className="text-gray-900 dark:text-white">{creditedAmount.toFixed(2)} 点</span>
                   </div>
                   <p className="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-white/[0.08] dark:text-gray-400">
-                    当前倍率：1 CNY = {balanceRechargeMultiplier.toFixed(2)} USD
+                    当前倍率：1 CNY = {balanceRechargeMultiplier.toFixed(2)} 点
                   </p>
                 </div>
               </div>

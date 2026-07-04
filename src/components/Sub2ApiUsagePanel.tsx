@@ -15,7 +15,7 @@ function formatDate(value: string) {
 }
 
 function formatCost(value: number) {
-  return `$${value.toFixed(6)}`
+  return `${value.toFixed(6)} 点`
 }
 
 export default function Sub2ApiUsagePanel({ active = true }: Sub2ApiUsagePanelProps) {
@@ -82,7 +82,7 @@ export default function Sub2ApiUsagePanel({ active = true }: Sub2ApiUsagePanelPr
                   <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">{formatDate(row.created_at)}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">费用</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">消耗点数</div>
                   <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{formatCost(row.actual_cost ?? 0)}</div>
                 </div>
               </div>

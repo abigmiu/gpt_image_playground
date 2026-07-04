@@ -221,8 +221,8 @@ export default function Sub2ApiPaymentStatus({
                     <span className="font-medium text-gray-900 dark:text-white">{paidOrder.out_trade_no}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-gray-500 dark:text-gray-400">充值金额</span>
-                    <span className="font-medium text-gray-900 dark:text-white">${paidOrder.amount.toFixed(2)}</span>
+                    <span className="text-gray-500 dark:text-gray-400">到账点数</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{paidOrder.amount.toFixed(2)} 点</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-gray-500 dark:text-gray-400">实付金额</span>

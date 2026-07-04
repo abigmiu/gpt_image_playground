@@ -49,5 +49,5 @@ export async function getSub2ApiPlaygroundPricing(): Promise<Sub2ApiPlaygroundPr
 
 export function formatSub2ApiPlaygroundPrice(price: number | null | undefined): string {
   if (typeof price !== 'number' || Number.isNaN(price)) return '--'
-  return `$${price.toFixed(3).replace(/\.?0+$/, '')}`
+  return `${price.toFixed(3).replace(/\.?0+$/, '')} 点`
 }

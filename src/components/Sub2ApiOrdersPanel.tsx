@@ -23,7 +23,12 @@ function formatDate(value: string) {
 }
 
 function formatOrderAmount(order: PaymentOrder) {
-  return `¥${order.pay_amount.toFixed(2)}`
+  return `${order.amount.toFixed(2)} 点`
+}
+
+function formatPaidAmount(order: PaymentOrder) {
+  const currency = typeof order.currency === 'string' && order.currency.trim() ? order.currency.trim().toUpperCase() : 'CNY'
+  return `${currency} ${order.pay_amount.toFixed(2)}`
 }
 
 function statusTone(status: string) {
@@ -165,12 +170,12 @@ export default function Sub2ApiOrdersPanel({ active = true }: Sub2ApiOrdersPanel
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <div className="text-gray-500 dark:text-gray-400">实付金额</div>
+                    <div className="text-gray-500 dark:text-gray-400">到账点数</div>
                     <div className="mt-1 font-medium text-gray-900 dark:text-white">{formatOrderAmount(order)}</div>
                   </div>
                   <div>
-                    <div className="text-gray-500 dark:text-gray-400">到账余额</div>
-                    <div className="mt-1 font-medium text-gray-900 dark:text-white">${order.amount.toFixed(2)}</div>
+                    <div className="text-gray-500 dark:text-gray-400">实付金额</div>
+                    <div className="mt-1 font-medium text-gray-900 dark:text-white">{formatPaidAmount(order)}</div>
                   </div>
                   <div>
                     <div className="text-gray-500 dark:text-gray-400">支付方式</div>
