@@ -44,7 +44,9 @@ interface RefreshTokenResponse {
 }
 
 const STORAGE_KEY = 'sub2api-auth-session'
+const CURRENT_USER_STORAGE_KEY = 'sub2api-current-user'
 const AUTH_CHANGE_EVENT = 'sub2api-auth-change'
+const CURRENT_USER_CHANGE_EVENT = 'sub2api-current-user-change'
 const CURRENT_USER_REFRESH_EVENT = 'sub2api-current-user-refresh'
 const AUTH_API_PREFIX = '/api/v1'
 const PLAYGROUND_API_PREFIX = '/api/v1/playground'
@@ -54,6 +56,11 @@ let refreshPromise: Promise<Sub2ApiAuthSession | null> | null = null
 function emitAuthChange() {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new Event(AUTH_CHANGE_EVENT))
+}
+
+function emitCurrentUserChange() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event(CURRENT_USER_CHANGE_EVENT))
 }
 
 function parseEnvelopeMessage(payload: unknown): string {
@@ -86,9 +93,33 @@ export function setSub2ApiAuthSession(session: Sub2ApiAuthSession) {
   emitAuthChange()
 }
 
+export function getCachedSub2ApiCurrentUser(): Sub2ApiCurrentUser | null {
+  if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as Sub2ApiCurrentUser
+  } catch {
+    return null
+  }
+}
+
+export function setCachedSub2ApiCurrentUser(user: Sub2ApiCurrentUser) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user))
+  emitCurrentUserChange()
+}
+
+export function clearCachedSub2ApiCurrentUser() {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(CURRENT_USER_STORAGE_KEY)
+  emitCurrentUserChange()
+}
+
 export function clearSub2ApiAuthSession() {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(STORAGE_KEY)
+  clearCachedSub2ApiCurrentUser()
   emitAuthChange()
 }
 
@@ -96,6 +127,12 @@ export function subscribeSub2ApiAuthChange(callback: () => void) {
   if (typeof window === 'undefined') return () => {}
   window.addEventListener(AUTH_CHANGE_EVENT, callback)
   return () => window.removeEventListener(AUTH_CHANGE_EVENT, callback)
+}
+
+export function subscribeSub2ApiCurrentUserChange(callback: () => void) {
+  if (typeof window === 'undefined') return () => {}
+  window.addEventListener(CURRENT_USER_CHANGE_EVENT, callback)
+  return () => window.removeEventListener(CURRENT_USER_CHANGE_EVENT, callback)
 }
 
 export function requestSub2ApiCurrentUserRefresh() {
@@ -206,6 +243,7 @@ export async function getSub2ApiCurrentUser() {
   if (!response.ok || payload.code !== 0 || !payload.data) {
     throw new Error(parseEnvelopeMessage(payload))
   }
+  setCachedSub2ApiCurrentUser(payload.data)
   return payload.data
 }
 

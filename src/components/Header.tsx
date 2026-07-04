@@ -5,6 +5,7 @@ import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import {
   clearSub2ApiAuthSession,
+  getCachedSub2ApiCurrentUser,
   getSub2ApiAuthSession,
   getSub2ApiCurrentUser,
   getSub2ApiUserDisplayName,
@@ -54,7 +55,7 @@ export default function Header() {
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showHeaderMenu, setShowHeaderMenu] = useState(false)
   const [showPricing, setShowPricing] = useState(false)
-  const [authUser, setAuthUser] = useState<Sub2ApiCurrentUser | null>(null)
+  const [authUser, setAuthUser] = useState<Sub2ApiCurrentUser | null>(() => getCachedSub2ApiCurrentUser())
   const [authReady, setAuthReady] = useState(false)
   const showToast = useStore((s) => s.showToast)
   const headerMenuRef = useRef<HTMLDivElement | null>(null)
@@ -131,6 +132,10 @@ export default function Header() {
             setAuthReady(true)
           }
           return
+        }
+
+        if (!cancelled) {
+          setAuthUser(getCachedSub2ApiCurrentUser())
         }
 
         try {

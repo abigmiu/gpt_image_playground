@@ -7,6 +7,7 @@ import {
   getSub2ApiPublicSettings,
   loginSub2Api,
   loginSub2Api2FA,
+  requestSub2ApiCurrentUserRefresh,
   registerSub2Api,
   sendSub2ApiVerifyCode,
   setSub2ApiAuthSession,
@@ -78,6 +79,7 @@ export default function Sub2ApiAuthModal({ onClose }: Sub2ApiAuthModalProps) {
       accessToken: payload.access_token,
       refreshToken: typeof payload.refresh_token === 'string' ? payload.refresh_token : '',
     })
+    requestSub2ApiCurrentUserRefresh()
     onClose()
     showToast('登录成功', 'success')
   }

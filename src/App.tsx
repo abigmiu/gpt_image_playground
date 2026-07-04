@@ -3,6 +3,11 @@ import { initStore } from './store'
 import { useStore } from './store'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import { useSub2ApiAnnouncementGate } from './hooks/useSub2ApiAnnouncementGate'
+import {
+  getCachedSub2ApiCurrentUser,
+  subscribeSub2ApiAuthChange,
+  subscribeSub2ApiCurrentUserChange,
+} from './lib/sub2apiAuth'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
@@ -22,6 +27,43 @@ import Sub2ApiAnnouncementModal from './components/Sub2ApiAnnouncementModal'
 import Sub2ApiAnnouncementCenterModal from './components/Sub2ApiAnnouncementCenterModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
+
+type TawkApi = {
+  onLoad?: () => void
+  setAttributes?: (attributes: Record<string, string>, callback?: (error: unknown) => void) => void
+  logout?: (callback?: (error: unknown) => void) => void
+}
+
+function syncTawkUser() {
+  if (typeof window === 'undefined') return
+
+  const tawkApi = window as Window & { Tawk_API?: TawkApi }
+  const user = getCachedSub2ApiCurrentUser()
+  const apply = () => {
+    if (!user) {
+      tawkApi.Tawk_API?.logout?.(() => {})
+      return
+    }
+
+    tawkApi.Tawk_API?.setAttributes?.({
+      'user-id': user.id ? String(user.id) : '',
+      'user-email': user.email?.trim() || '',
+      'user-name': user.display_name?.trim() || user.nickname?.trim() || user.username?.trim() || '',
+    }, () => {})
+  }
+
+  if (typeof tawkApi.Tawk_API?.setAttributes === 'function' || typeof tawkApi.Tawk_API?.logout === 'function') {
+    apply()
+    return
+  }
+
+  tawkApi.Tawk_API = tawkApi.Tawk_API || {}
+  const previousOnLoad = tawkApi.Tawk_API.onLoad
+  tawkApi.Tawk_API.onLoad = () => {
+    previousOnLoad?.()
+    apply()
+  }
+}
 
 export default function App() {
   const filterFavorite = useStore((s) => s.filterFavorite)
@@ -56,6 +98,21 @@ export default function App() {
 
     document.addEventListener('dragstart', preventPageImageDrag)
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
+  }, [])
+
+  useEffect(() => {
+    syncTawkUser()
+    const unsubscribeAuth = subscribeSub2ApiAuthChange(() => {
+      syncTawkUser()
+    })
+    const unsubscribeUserChange = subscribeSub2ApiCurrentUserChange(() => {
+      syncTawkUser()
+    })
+
+    return () => {
+      unsubscribeAuth()
+      unsubscribeUserChange()
+    }
   }, [])
 
   return (
