@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { Sub2ApiPaymentModalTab } from '../types'
 import { useStore } from '../store'
 import { useTooltip } from '../hooks/useTooltip'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
@@ -225,19 +226,26 @@ export default function Header() {
   const authDisplayName = getSub2ApiUserDisplayName(authUser)
   const authBalance = typeof authUser?.balance === 'number' ? formatBalance(authUser.balance) : ''
 
-  const openRecharge = () => {
+  const openProtectedPaymentTab = (tab: Sub2ApiPaymentModalTab) => {
     dismissAllTooltips()
-    setShowSub2ApiPaymentModal(true, 'recharge')
+    if (!getSub2ApiAuthSession()?.accessToken) {
+      setShowAuthModal(true)
+      showToast('请先登录后再使用该功能', 'info')
+      return
+    }
+    setShowSub2ApiPaymentModal(true, tab)
+  }
+
+  const openRecharge = () => {
+    openProtectedPaymentTab('recharge')
   }
 
   const openOrders = () => {
-    dismissAllTooltips()
-    setShowSub2ApiPaymentModal(true, 'orders')
+    openProtectedPaymentTab('orders')
   }
 
   const openUsage = () => {
-    dismissAllTooltips()
-    setShowSub2ApiPaymentModal(true, 'usage')
+    openProtectedPaymentTab('usage')
   }
 
   const openPricing = () => {
@@ -328,7 +336,7 @@ export default function Header() {
                     type="button"
                     onClick={() => {
                       setShowHeaderMenu(false)
-                      setShowSub2ApiPaymentModal(true, 'recharge')
+                      openRecharge()
                     }}
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
                   >
@@ -338,7 +346,7 @@ export default function Header() {
                     type="button"
                     onClick={() => {
                       setShowHeaderMenu(false)
-                      setShowSub2ApiPaymentModal(true, 'orders')
+                      openOrders()
                     }}
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
                   >
@@ -358,7 +366,7 @@ export default function Header() {
                     type="button"
                     onClick={() => {
                       setShowHeaderMenu(false)
-                      setShowSub2ApiPaymentModal(true, 'usage')
+                      openUsage()
                     }}
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
                   >
