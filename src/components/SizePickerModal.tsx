@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { calculateImageSize, normalizeImageSize, parseRatio, type SizeTier } from '../lib/size'
+import { calculateImageSize, classifyImageSizeTier, normalizeImageSize, parseRatio, type SizeTier } from '../lib/size'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
+import { formatSub2ApiPlaygroundPrice, getSub2ApiPlaygroundPricing, type Sub2ApiPlaygroundPricing } from '../lib/sub2apiPlaygroundPricing'
 import ViewportTooltip from './ViewportTooltip'
 
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
@@ -86,12 +87,31 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   // Resolution mode state
   const [customW, setCustomW] = useState(currentParsedSize?.width ?? '1024')
   const [customH, setCustomH] = useState(currentParsedSize?.height ?? '1024')
+  const [pricing, setPricing] = useState<Sub2ApiPlaygroundPricing | null>(null)
 
   const [hintVisible, setHintVisible] = useState(false)
   const hintTimerRef = useRef<number | null>(null)
 
   useEffect(() => () => {
     if (hintTimerRef.current != null) window.clearTimeout(hintTimerRef.current)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadPricing = async () => {
+      try {
+        const next = await getSub2ApiPlaygroundPricing()
+        if (!cancelled) setPricing(next)
+      } catch {
+        if (!cancelled) setPricing(null)
+      }
+    }
+
+    void loadPricing()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const activeRatio = ratio === 'custom' ? customRatio : ratio
@@ -134,6 +154,11 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
     }
     return false
   }, [mode, ratio, customRatioClamped, customW, customH, previewSize])
+
+  const previewTier = useMemo(() => {
+    if (!previewSize || previewSize === 'auto') return null
+    return classifyImageSizeTier(previewSize)
+  }, [previewSize])
 
   const showHint = () => setHintVisible(true)
   const hideHint = () => {
@@ -217,8 +242,9 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                   <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">基准分辨率</div>
                   <div className="grid grid-cols-3 gap-2">
                     {TIERS.map((item) => (
-                      <button key={item} className={buttonClass(tier === item)} onClick={() => setTier(item)}>
-                        {item}
+                      <button key={item} className={`${buttonClass(tier === item)} flex flex-col items-center gap-0.5`} onClick={() => setTier(item)}>
+                        <span>{item}</span>
+                        <span className="text-[11px] font-normal opacity-75">{formatSub2ApiPlaygroundPrice(pricing?.[item]?.price)}</span>
                       </button>
                     ))}
                   </div>
@@ -361,6 +387,14 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                 </div>
               )}
             </div>
+            {previewTier ? (
+              <div className="mt-2 flex items-center justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">{previewTier}</span>
+                <span className="font-medium text-gray-800 dark:text-gray-100">
+                  {formatSub2ApiPlaygroundPrice(pricing?.[previewTier]?.price)}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 

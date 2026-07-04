@@ -16,6 +16,7 @@ import { listSub2ApiAnnouncements } from '../lib/sub2apiAnnouncements'
 import ViewportTooltip from './ViewportTooltip'
 import HelpModal from './HelpModal'
 import Sub2ApiAuthModal from './Sub2ApiAuthModal'
+import Sub2ApiPricingModal from './Sub2ApiPricingModal'
 import { useFavoriteCollectionTitle } from './FavoriteCollections'
 import { BellIcon, HelpCircleIcon, InstallIcon, SettingsIcon } from './icons'
 
@@ -51,6 +52,7 @@ export default function Header() {
   const [scrollDirection, setScrollDirection] = useState<'up' | 'down'>('up')
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showHeaderMenu, setShowHeaderMenu] = useState(false)
+  const [showPricing, setShowPricing] = useState(false)
   const [authUser, setAuthUser] = useState<Sub2ApiCurrentUser | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const showToast = useStore((s) => s.showToast)
@@ -238,6 +240,11 @@ export default function Header() {
     setShowSub2ApiPaymentModal(true, 'usage')
   }
 
+  const openPricing = () => {
+    dismissAllTooltips()
+    setShowPricing(true)
+  }
+
   const openAnnouncements = () => {
     dismissAllTooltips()
     setShowAnnouncementCenter(true)
@@ -341,6 +348,16 @@ export default function Header() {
                     type="button"
                     onClick={() => {
                       setShowHeaderMenu(false)
+                      setShowPricing(true)
+                    }}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+                  >
+                    价格
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeaderMenu(false)
                       setShowSub2ApiPaymentModal(true, 'usage')
                     }}
                     className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
@@ -371,6 +388,13 @@ export default function Header() {
                 className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
               >
                 使用记录
+              </button>
+              <button
+                type="button"
+                onClick={openPricing}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+              >
+                价格
               </button>
               <button
                 type="button"
@@ -540,6 +564,7 @@ export default function Header() {
         </div>
       </div>
       {showHelp && <HelpModal appMode={appMode} isFavoriteCollectionOverview={appMode === 'gallery' && filterFavorite && !activeFavoriteCollectionId} onClose={() => setShowHelp(false)} />}
+      {showPricing ? <Sub2ApiPricingModal onClose={() => setShowPricing(false)} /> : null}
     </>
   )
 }
