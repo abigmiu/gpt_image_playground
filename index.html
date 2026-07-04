@@ -19,6 +19,25 @@
     <script type="text/javascript">
       var Tawk_API = Tawk_API || {},
         Tawk_LoadStart = new Date()
+      try {
+        var user = JSON.parse(localStorage.getItem('sub2api-current-user') || '{}')
+        if (user && user.id) {
+          Tawk_API.visitor = {
+            name: user.email || '',
+            email: user.email || '',
+          }
+          Tawk_API.onLoad = function () {
+            Tawk_API.setAttributes(
+              {
+                userid: String(user.id),
+                username: user.username || '',
+                role: String(user.role || ''),
+              },
+              function () {},
+            )
+          }
+        }
+      } catch (e) {}
       ;(function () {
         var s1 = document.createElement('script'),
           s0 = document.getElementsByTagName('script')[0]

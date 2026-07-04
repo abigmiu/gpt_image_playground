@@ -4,6 +4,7 @@ import { useStore } from './store'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import { useSub2ApiAnnouncementGate } from './hooks/useSub2ApiAnnouncementGate'
 import {
+  getSub2ApiAuthSession,
   getCachedSub2ApiCurrentUser,
   subscribeSub2ApiAuthChange,
   subscribeSub2ApiCurrentUserChange,
@@ -29,6 +30,10 @@ import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectio
 import { useGlobalClickSuppression } from './lib/clickSuppression'
 
 type TawkApi = {
+  visitor?: {
+    name?: string
+    email?: string
+  }
   onLoad?: () => void
   setAttributes?: (attributes: Record<string, string>, callback?: (error: unknown) => void) => void
   logout?: (callback?: (error: unknown) => void) => void
@@ -38,17 +43,26 @@ function syncTawkUser() {
   if (typeof window === 'undefined') return
 
   const tawkApi = window as Window & { Tawk_API?: TawkApi }
-  const user = getCachedSub2ApiCurrentUser()
+  const session = getSub2ApiAuthSession()
+  const user = getCachedSub2ApiCurrentUser() as (ReturnType<typeof getCachedSub2ApiCurrentUser> & { role?: string }) | null
+  const visitorEmail = user?.email?.trim() || ''
   const apply = () => {
-    if (!user) {
+    if (!session?.accessToken || !user?.id) {
       tawkApi.Tawk_API?.logout?.(() => {})
       return
     }
 
+    tawkApi.Tawk_API = tawkApi.Tawk_API || {}
+    tawkApi.Tawk_API.visitor = {
+      name: visitorEmail,
+      email: visitorEmail,
+    }
     tawkApi.Tawk_API?.setAttributes?.({
-      'user-id': user.id ? String(user.id) : '',
-      'user-email': user.email?.trim() || '',
-      'user-name': user.display_name?.trim() || user.nickname?.trim() || user.username?.trim() || '',
+      name: visitorEmail,
+      email: visitorEmail,
+      userid: String(user.id),
+      username: user.username?.trim() || '',
+      role: typeof user.role === 'string' ? user.role : '',
     }, () => {})
   }
 
