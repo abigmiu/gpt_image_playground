@@ -21,10 +21,22 @@ import {
   type PaymentRecoverySnapshot,
 } from '../lib/sub2apiPayment'
 import { requestSub2ApiCurrentUserRefresh } from '../lib/sub2apiAuth'
+import { parseRedeemCodesInput, redeemSub2ApiCode, type Sub2ApiRedeemResult } from '../lib/sub2apiRedeem'
 import Sub2ApiPaymentStatus from './Sub2ApiPaymentStatus'
 
 interface Sub2ApiPaymentModalProps {
   onClose: () => void
+}
+
+const REDEEM_PURCHASE_URL = 'https://catfk.com/shop/5AB5YFXH'
+
+type PaymentModalTab = 'recharge' | 'redeem'
+
+interface RedeemBatchResult {
+  code: string
+  success: boolean
+  detail: string
+  payload?: Sub2ApiRedeemResult
 }
 
 type WeixinJSBridgeLike = {
@@ -111,13 +123,25 @@ function formatPaymentAmount(value: number, currency?: string) {
   }
 }
 
+function formatRedeemResultDetail(result: Sub2ApiRedeemResult) {
+  if (result.type === 'balance') return `+ $${result.value.toFixed(2)}`
+  if (result.type === 'concurrency') return `+ ${result.value} 并发`
+  if (result.type === 'subscription') {
+    const groupName = result.group?.name?.trim() || ''
+    const validityDays = result.validity_days && result.validity_days > 0 ? `${result.validity_days} 天` : ''
+    return [groupName, validityDays].filter(Boolean).join(' ')
+  }
+  return result.message
+}
+
 export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProps) {
   const modalRef = useRef<HTMLDivElement>(null)
   const showToast = useStore((s) => s.showToast)
-  const [loading, setLoading] = useState(true)
+  const [checkoutLoading, setCheckoutLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [amount, setAmount] = useState<number | null>(null)
   const [selectedMethod, setSelectedMethod] = useState('')
+  const [activeTab, setActiveTab] = useState<PaymentModalTab>('recharge')
   const [checkout, setCheckout] = useState<CheckoutInfoResponse>({
     methods: {},
     global_min: 0,
@@ -133,6 +157,9 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
   const [paymentPhase, setPaymentPhase] = useState<'select' | 'paying'>('select')
   const [paymentState, setPaymentState] = useState<PaymentRecoverySnapshot>(emptyPaymentState())
   const [errorMessage, setErrorMessage] = useState('')
+  const [redeemInput, setRedeemInput] = useState('')
+  const [redeemSubmitting, setRedeemSubmitting] = useState(false)
+  const [redeemResults, setRedeemResults] = useState<RedeemBatchResult[]>([])
 
   useCloseOnEscape(true, onClose)
   usePreventBackgroundScroll(true, modalRef)
@@ -161,6 +188,9 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
   const totalAmount = feeRate > 0 && validAmount > 0
     ? Math.round((validAmount + feeAmount) * 100) / 100
     : validAmount
+  const redeemCodes = useMemo(() => parseRedeemCodesInput(redeemInput), [redeemInput])
+  const redeemSuccessCount = useMemo(() => redeemResults.filter((item) => item.success).length, [redeemResults])
+  const redeemFailureCount = redeemResults.length - redeemSuccessCount
 
   const amountFitsMethod = (targetAmount: number, methodType: string) => {
     if (targetAmount <= 0) return true
@@ -223,6 +253,7 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
           if (restored) {
             setPaymentState(restored)
             setPaymentPhase('paying')
+            setActiveTab('recharge')
             const restoredMethod = normalizeVisibleMethod(restored.paymentType)
             if (restoredMethod) {
               setSelectedMethod(restoredMethod)
@@ -237,7 +268,7 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
         showToast(err instanceof Error ? err.message : '加载充值信息失败', 'error')
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setCheckoutLoading(false)
       })
 
     return () => {
@@ -359,6 +390,52 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
     removeRecoverySnapshot()
   }
 
+  const handleRedeemSubmit = async () => {
+    if (redeemCodes.length === 0) {
+      showToast('请输入兑换码', 'error')
+      return
+    }
+
+    setRedeemSubmitting(true)
+    setRedeemResults([])
+    const nextResults: RedeemBatchResult[] = []
+
+    try {
+      for (const code of redeemCodes) {
+        try {
+          const payload = await redeemSub2ApiCode(code)
+          nextResults.push({
+            code,
+            success: true,
+            detail: formatRedeemResultDetail(payload),
+            payload,
+          })
+        } catch (err) {
+          nextResults.push({
+            code,
+            success: false,
+            detail: err instanceof Error ? err.message : '兑换失败',
+          })
+        }
+        setRedeemResults([...nextResults])
+      }
+
+      requestSub2ApiCurrentUserRefresh()
+
+      const succeeded = nextResults.filter((item) => item.success).length
+      const failed = nextResults.length - succeeded
+      if (failed === 0) {
+        showToast(`已兑换 ${succeeded} 个兑换码`, 'success')
+      } else if (succeeded === 0) {
+        showToast('兑换失败', 'error')
+      } else {
+        showToast(`已兑换 ${succeeded} 个，失败 ${failed} 个`, 'info')
+      }
+    } finally {
+      setRedeemSubmitting(false)
+    }
+  }
+
   return createPortal(
     <div
       data-no-drag-select
@@ -368,7 +445,7 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-overlay-in" />
       <div
         ref={modalRef}
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-gray-200/70 bg-white shadow-xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900 dark:ring-white/10"
+        className="relative z-10 w-full max-w-2xl overflow-hidden rounded-2xl border border-gray-200/70 bg-white shadow-xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900 dark:ring-white/10"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-4 border-b border-gray-200/70 px-5 py-4 dark:border-white/[0.08]">
@@ -378,7 +455,7 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a5 5 0 00-10 0v2m-2 0h14a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1v-8a1 1 0 011-1z" />
               </svg>
             </div>
-            <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">余额充值</h3>
+            <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">充值 / 兑换码</h3>
           </div>
           <button
             type="button"
@@ -392,11 +469,7 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
           </button>
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-900 border-t-transparent dark:border-white dark:border-t-transparent" />
-          </div>
-        ) : paymentPhase === 'paying' ? (
+        {paymentPhase === 'paying' ? (
           <div className="p-5">
             <Sub2ApiPaymentStatus
               orderId={paymentState.orderId}
@@ -412,133 +485,240 @@ export default function Sub2ApiPaymentModal({ onClose }: Sub2ApiPaymentModalProp
           </div>
         ) : (
           <div className="space-y-4 p-5">
-            <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
-              <div className="mb-3 flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-2.761 0-5 1.12-5 2.5S9.239 13 12 13s5-1.12 5-2.5S14.761 8 12 8zm0 0V6m0 7v5m-7-3.5C5 15.88 8.134 17 12 17s7-1.12 7-2.5" />
-                  </svg>
-                </div>
-                <p className="text-sm font-bold text-gray-800 dark:text-gray-100">充值金额</p>
-              </div>
-              <div className="mt-3 grid grid-cols-4 gap-2">
-                {quickAmounts.map((quickAmount) => (
-                  <button
-                    key={quickAmount}
-                    type="button"
-                    onClick={() => setAmount(quickAmount)}
-                    className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${
-                      amount === quickAmount
-                        ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-                        : 'border-gray-200 bg-gray-50/80 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08] dark:hover:text-white'
-                    }`}
-                  >
-                    {quickAmount}
-                  </button>
-                ))}
-              </div>
-              <input
-                value={amount ?? ''}
-                onChange={(event) => setAmount(event.target.value ? Number(event.target.value) : null)}
-                type="number"
-                min="0"
-                max={globalMax > 0 ? globalMax : undefined}
-                step="0.01"
-                placeholder="输入金额"
-                className="mt-3 w-full rounded-xl border border-gray-200/70 bg-gray-50/80 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:bg-white dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-white/[0.16] dark:focus:bg-white/[0.05]"
-              />
-              {amountError ? <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">{amountError}</p> : null}
+            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-gray-200/70 bg-gray-100/70 p-1 dark:border-white/[0.08] dark:bg-white/[0.04]">
+              <button
+                type="button"
+                onClick={() => setActiveTab('recharge')}
+                className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                  activeTab === 'recharge'
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                充值
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('redeem')}
+                className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                  activeTab === 'redeem'
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                兑换码
+              </button>
             </div>
 
-            <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
-              <div className="mb-3 flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a5 5 0 00-10 0v2m-2 0h14a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1v-8a1 1 0 011-1z" />
-                  </svg>
+            {activeTab === 'recharge' ? (
+              checkoutLoading ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-900 border-t-transparent dark:border-white dark:border-t-transparent" />
                 </div>
-                <p className="text-sm font-bold text-gray-800 dark:text-gray-100">支付方式</p>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {enabledMethods.map((method) => {
-                  const limit: MethodLimit | undefined = visibleMethods[method]
-                  const labelMap: Record<string, string> = {
-                    alipay: '支付宝',
-                    wxpay: '微信支付',
-                    stripe: 'Stripe',
-                    airwallex: 'Airwallex',
-                  }
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => setSelectedMethod(method)}
-                      className={`rounded-xl border px-4 py-3 text-left text-sm transition ${methodButtonClass(method)} ${limit?.available === false ? 'opacity-50' : ''}`}
-                    >
-                      <div className="font-medium">{labelMap[method] || method}</div>
-                      <div className="mt-1 text-xs opacity-70">
-                        {limit?.currency ? `${limit.currency.toUpperCase()}` : 'CNY'}
+              ) : (
+                <>
+                  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
+                    <div className="mb-3 flex items-center gap-2">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-2.761 0-5 1.12-5 2.5S9.239 13 12 13s5-1.12 5-2.5S14.761 8 12 8zm0 0V6m0 7v5m-7-3.5C5 15.88 8.134 17 12 17s7-1.12 7-2.5" />
+                        </svg>
                       </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+                      <p className="text-sm font-bold text-gray-800 dark:text-gray-100">充值金额</p>
+                    </div>
+                    <div className="mt-3 grid grid-cols-4 gap-2">
+                      {quickAmounts.map((quickAmount) => (
+                        <button
+                          key={quickAmount}
+                          type="button"
+                          onClick={() => setAmount(quickAmount)}
+                          className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                            amount === quickAmount
+                              ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+                              : 'border-gray-200 bg-gray-50/80 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08] dark:hover:text-white'
+                          }`}
+                        >
+                          {quickAmount}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      value={amount ?? ''}
+                      onChange={(event) => setAmount(event.target.value ? Number(event.target.value) : null)}
+                      type="number"
+                      min="0"
+                      max={globalMax > 0 ? globalMax : undefined}
+                      step="0.01"
+                      placeholder="输入金额"
+                      className="mt-3 w-full rounded-xl border border-gray-200/70 bg-gray-50/80 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:bg-white dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-white/[0.16] dark:focus:bg-white/[0.05]"
+                    />
+                    {amountError ? <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">{amountError}</p> : null}
+                  </div>
 
-            {validAmount > 0 ? (
-              <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
-                <div className="mb-3 flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-2.761 0-5 1.12-5 2.5S9.239 13 12 13s5-1.12 5-2.5S14.761 8 12 8zm0 0V6m0 7v5m-7-3.5C5 15.88 8.134 17 12 17s7-1.12 7-2.5" />
-                    </svg>
+                  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
+                    <div className="mb-3 flex items-center gap-2">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a5 5 0 00-10 0v2m-2 0h14a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1v-8a1 1 0 011-1z" />
+                        </svg>
+                      </div>
+                      <p className="text-sm font-bold text-gray-800 dark:text-gray-100">支付方式</p>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {enabledMethods.map((method) => {
+                        const limit: MethodLimit | undefined = visibleMethods[method]
+                        const labelMap: Record<string, string> = {
+                          alipay: '支付宝',
+                          wxpay: '微信支付',
+                          stripe: 'Stripe',
+                          airwallex: 'Airwallex',
+                        }
+                        return (
+                          <button
+                            key={method}
+                            type="button"
+                            onClick={() => setSelectedMethod(method)}
+                            className={`rounded-xl border px-4 py-3 text-left text-sm transition ${methodButtonClass(method)} ${limit?.available === false ? 'opacity-50' : ''}`}
+                          >
+                            <div className="font-medium">{labelMap[method] || method}</div>
+                            <div className="mt-1 text-xs opacity-70">
+                              {limit?.currency ? `${limit.currency.toUpperCase()}` : 'CNY'}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <p className="text-sm font-bold text-gray-800 dark:text-gray-100">支付明细</p>
-                </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-gray-500 dark:text-gray-400">充值金额</span>
-                    <span className="text-gray-900 dark:text-white">{formatPaymentAmount(validAmount, selectedCurrency)}</span>
-                  </div>
-                  {feeRate > 0 ? (
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-gray-500 dark:text-gray-400">手续费 ({feeRate}%)</span>
-                      <span className="text-gray-900 dark:text-white">{formatPaymentAmount(feeAmount, selectedCurrency)}</span>
+
+                  {validAmount > 0 ? (
+                    <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-white/[0.06] dark:bg-white/[0.02]">
+                      <div className="mb-3 flex items-center gap-2">
+                        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-700 dark:bg-white/[0.06] dark:text-gray-200">
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-2.761 0-5 1.12-5 2.5S9.239 13 12 13s5-1.12 5-2.5S14.761 8 12 8zm0 0V6m0 7v5m-7-3.5C5 15.88 8.134 17 12 17s7-1.12 7-2.5" />
+                          </svg>
+                        </div>
+                        <p className="text-sm font-bold text-gray-800 dark:text-gray-100">支付明细</p>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-gray-500 dark:text-gray-400">充值金额</span>
+                          <span className="text-gray-900 dark:text-white">{formatPaymentAmount(validAmount, selectedCurrency)}</span>
+                        </div>
+                        {feeRate > 0 ? (
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-gray-500 dark:text-gray-400">手续费 ({feeRate}%)</span>
+                            <span className="text-gray-900 dark:text-white">{formatPaymentAmount(feeAmount, selectedCurrency)}</span>
+                          </div>
+                        ) : null}
+                        {feeRate > 0 ? (
+                          <div className="flex items-center justify-between gap-4 border-t border-gray-200 pt-2 dark:border-white/[0.08]">
+                            <span className="font-medium text-gray-700 dark:text-gray-300">实付金额</span>
+                            <span className="text-lg font-bold text-gray-900 dark:text-white">{formatPaymentAmount(totalAmount, selectedCurrency)}</span>
+                          </div>
+                        ) : null}
+                        <div className={`flex items-center justify-between gap-4 ${feeRate > 0 ? '' : 'border-t border-gray-200 pt-2 dark:border-white/[0.08]'}`}>
+                          <span className="text-gray-500 dark:text-gray-400">到账点数</span>
+                          <span className="text-gray-900 dark:text-white">{creditedAmount.toFixed(2)} 点</span>
+                        </div>
+                        <p className="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-white/[0.08] dark:text-gray-400">
+                          当前倍率：1 CNY = {balanceRechargeMultiplier.toFixed(2)} 点
+                        </p>
+                      </div>
                     </div>
                   ) : null}
-                  {feeRate > 0 ? (
-                    <div className="flex items-center justify-between gap-4 border-t border-gray-200 pt-2 dark:border-white/[0.08]">
-                      <span className="font-medium text-gray-700 dark:text-gray-300">实付金额</span>
-                      <span className="text-lg font-bold text-gray-900 dark:text-white">{formatPaymentAmount(totalAmount, selectedCurrency)}</span>
+
+                  {errorMessage ? (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+                      {errorMessage}
                     </div>
                   ) : null}
-                  <div className={`flex items-center justify-between gap-4 ${feeRate > 0 ? '' : 'border-t border-gray-200 pt-2 dark:border-white/[0.08]'}`}>
-                    <span className="text-gray-500 dark:text-gray-400">到账点数</span>
-                    <span className="text-gray-900 dark:text-white">{creditedAmount.toFixed(2)} 点</span>
+
+                  <button
+                    type="button"
+                    disabled={!canSubmit || submitting}
+                    onClick={() => {
+                      void createOrder(validAmount, 'balance')
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-gray-100/80 disabled:hover:text-gray-700 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white dark:disabled:hover:bg-white/[0.06] dark:disabled:hover:text-gray-300"
+                  >
+                    {submitting ? '处理中…' : `确认支付 ${formatPaymentAmount(totalAmount, selectedCurrency)}`}
+                  </button>
+                </>
+              )
+            ) : (
+              <>
+                <a
+                  href={REDEEM_PURCHASE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between rounded-2xl border border-gray-200/70 bg-white/70 px-4 py-3 text-sm text-gray-700 transition hover:border-gray-300 hover:bg-white dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:hover:border-white/[0.16] dark:hover:bg-white/[0.05]"
+                >
+                  <span>购买兑换码</span>
+                  <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 17L17 7M17 7H9M17 7v8" />
+                  </svg>
+                </a>
+                <p className="text-sm text-gray-500 dark:text-gray-400">请选择图片生成分类下的商品进行购买，并按需购买，避免一次性充值过多</p>
+
+                <textarea
+                  value={redeemInput}
+                  onChange={(event) => setRedeemInput(event.target.value)}
+                  placeholder="兑换码"
+                  spellCheck={false}
+                  className="min-h-36 w-full resize-y rounded-2xl border border-gray-200/70 bg-white/70 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                />
+
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    {redeemCodes.length > 0 ? `${redeemCodes.length} 个` : ''}
                   </div>
-                  <p className="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-white/[0.08] dark:text-gray-400">
-                    当前倍率：1 CNY = {balanceRechargeMultiplier.toFixed(2)} 点
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleRedeemSubmit()
+                    }}
+                    disabled={redeemSubmitting || redeemCodes.length === 0}
+                    className="rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {redeemSubmitting ? `处理中 ${redeemResults.length}/${redeemCodes.length}` : '兑换'}
+                  </button>
                 </div>
-              </div>
-            ) : null}
 
-            {errorMessage ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
-                {errorMessage}
-              </div>
-            ) : null}
-
-            <button
-              type="button"
-              disabled={!canSubmit || submitting}
-              onClick={() => {
-                void createOrder(validAmount, 'balance')
-              }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-100/80 px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-gray-100/80 disabled:hover:text-gray-700 dark:bg-white/[0.06] dark:text-gray-300 dark:hover:bg-white/[0.1] dark:hover:text-white dark:disabled:hover:bg-white/[0.06] dark:disabled:hover:text-gray-300"
-            >
-              {submitting ? '处理中…' : `确认支付 ${formatPaymentAmount(totalAmount, selectedCurrency)}`}
-            </button>
+                {redeemResults.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 text-sm text-gray-500 dark:text-gray-400">
+                      <span>成功 {redeemSuccessCount}</span>
+                      <span>失败 {redeemFailureCount}</span>
+                    </div>
+                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                      {redeemResults.map((item, index) => (
+                        <div
+                          key={`${item.code}-${index}`}
+                          className={`rounded-2xl border px-4 py-3 ${
+                            item.success
+                              ? 'border-green-200 bg-green-50/70 dark:border-green-500/20 dark:bg-green-500/10'
+                              : 'border-red-200 bg-red-50/70 dark:border-red-500/20 dark:bg-red-500/10'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate font-mono text-sm text-gray-800 dark:text-gray-100">{item.code}</div>
+                              <div className={`mt-1 text-sm ${item.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
+                                {item.detail}
+                              </div>
+                            </div>
+                            <div className={`shrink-0 text-xs font-semibold ${item.success ? 'text-green-600 dark:text-green-300' : 'text-red-600 dark:text-red-300'}`}>
+                              {item.success ? '成功' : '失败'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
         )}
       </div>
