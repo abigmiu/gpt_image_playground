@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { calculateImageSize, classifyImageSizeTier, normalizeImageSize, parseRatio, type SizeTier } from '../lib/size'
+import { BUILTIN_SIZE_PRESETS, loadCustomSizePresets, saveCustomSizePresets, type SizePreset } from '../lib/customSizePresets'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { formatSub2ApiPlaygroundPrice, getSub2ApiPlaygroundPricing, type Sub2ApiPlaygroundPricing } from '../lib/sub2apiPlaygroundPricing'
 import ViewportTooltip from './ViewportTooltip'
@@ -33,6 +34,13 @@ function parseSize(size: string) {
   return { width: match[1], height: match[2] }
 }
 
+function buildPresetId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `custom-size-${Date.now()}`
+}
+
 function findPresetForSize(size: string) {
   const normalized = normalizeImageSize(size)
   for (const tier of TIERS) {
@@ -46,10 +54,11 @@ function findPresetForSize(size: string) {
 }
 
 export default function SizePickerModal({ currentSize, onSelect, onClose, allowAuto = true }: Props) {
-  usePreventBackgroundScroll(true)
-
   const modalRef = useRef<HTMLDivElement>(null)
+  const scrollBoundaryRef = useRef<HTMLDivElement>(null)
   const mouseDownTargetRef = useRef<EventTarget | null>(null)
+
+  usePreventBackgroundScroll(true, scrollBoundaryRef)
 
   const handleMouseDown = (e: React.MouseEvent) => {
     mouseDownTargetRef.current = e.target
@@ -87,6 +96,8 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   // Resolution mode state
   const [customW, setCustomW] = useState(currentParsedSize?.width ?? '1024')
   const [customH, setCustomH] = useState(currentParsedSize?.height ?? '1024')
+  const [customPresetName, setCustomPresetName] = useState('')
+  const [customPresets, setCustomPresets] = useState<SizePreset[]>([])
   const [pricing, setPricing] = useState<Sub2ApiPlaygroundPricing | null>(null)
 
   const [hintVisible, setHintVisible] = useState(false)
@@ -112,6 +123,10 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
     return () => {
       cancelled = true
     }
+  }, [])
+
+  useEffect(() => {
+    setCustomPresets(loadCustomSizePresets())
   }, [])
 
   const activeRatio = ratio === 'custom' ? customRatio : ratio
@@ -160,6 +175,18 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
     return classifyImageSizeTier(previewSize)
   }, [previewSize])
 
+  const parsedResolutionWidth = Number.parseInt(customW, 10)
+  const parsedResolutionHeight = Number.parseInt(customH, 10)
+  const canSaveCustomPreset = customPresetName.trim().length > 0
+    && Number.isFinite(parsedResolutionWidth)
+    && Number.isFinite(parsedResolutionHeight)
+    && parsedResolutionWidth > 0
+    && parsedResolutionHeight > 0
+
+  const isPresetSelected = (preset: SizePreset) => (
+    String(preset.width) === customW.trim() && String(preset.height) === customH.trim()
+  )
+
   const showHint = () => setHintVisible(true)
   const hideHint = () => {
     setHintVisible(false)
@@ -182,6 +209,32 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
     if (!previewSize) return
     onSelect(previewSize)
     onClose()
+  }
+
+  const applyResolutionPreset = (preset: SizePreset) => {
+    setCustomW(String(preset.width))
+    setCustomH(String(preset.height))
+  }
+
+  const handleSaveCustomPreset = () => {
+    if (!canSaveCustomPreset) return
+
+    const nextPreset: SizePreset = {
+      id: buildPresetId(),
+      name: customPresetName.trim(),
+      width: parsedResolutionWidth,
+      height: parsedResolutionHeight,
+    }
+    const nextPresets = [...customPresets, nextPreset]
+    setCustomPresets(nextPresets)
+    saveCustomSizePresets(nextPresets)
+    setCustomPresetName('')
+  }
+
+  const handleDeleteCustomPreset = (id: string) => {
+    const nextPresets = customPresets.filter((preset) => preset.id !== id)
+    setCustomPresets(nextPresets)
+    saveCustomSizePresets(nextPresets)
   }
 
   const buttonClass = (active: boolean) => {
@@ -235,7 +288,10 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
             </button>
           </div>
 
-          <div className="h-[380px] max-h-[55vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-white/10 pr-1 -mr-1 pb-2">
+          <div
+            ref={scrollBoundaryRef}
+            className="h-[380px] max-h-[55vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-white/10 pr-1 -mr-1 pb-2"
+          >
             {mode === 'ratio' && (
               <div className="space-y-5 animate-fade-in">
                 <section>
@@ -321,6 +377,57 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
             {mode === 'resolution' && (
               <div className="space-y-5 animate-fade-in">
                 <section>
+                  <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">固定尺寸</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {BUILTIN_SIZE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        className={`${buttonClass(isPresetSelected(preset))} flex min-h-[72px] flex-col items-start justify-center gap-1 text-left`}
+                        onClick={() => applyResolutionPreset(preset)}
+                      >
+                        <span className="text-sm font-medium">{preset.name}</span>
+                        <span className="font-mono text-xs opacity-75">{preset.width}×{preset.height}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {customPresets.length > 0 && (
+                  <section>
+                    <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">自定义选项</div>
+                    <div className="space-y-2">
+                      {customPresets.map((preset) => (
+                        <div
+                          key={preset.id}
+                          className={`flex items-center gap-2 rounded-xl border px-3 py-2 transition ${
+                            isPresetSelected(preset)
+                              ? 'border-blue-400 bg-blue-50 dark:border-blue-500/50 dark:bg-blue-500/10'
+                              : 'border-gray-200/70 bg-white/60 dark:border-white/[0.08] dark:bg-white/[0.03]'
+                          }`}
+                        >
+                          <button
+                            className="min-w-0 flex-1 text-left"
+                            onClick={() => applyResolutionPreset(preset)}
+                          >
+                            <div className="truncate text-sm font-medium text-gray-700 dark:text-gray-100">{preset.name}</div>
+                            <div className="font-mono text-xs text-gray-500 dark:text-gray-400">{preset.width}×{preset.height}</div>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCustomPreset(preset.id)}
+                            className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
+                            aria-label={`删除 ${preset.name}`}
+                          >
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 7h12M9 7V5h6v2m-7 4v6m4-6v6m4-6v6M7 7l1 12h8l1-12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                <section>
                   <div className="mb-4 text-xs font-medium text-gray-400 dark:text-gray-500">输入具体像素值</div>
                   <div className="flex items-center gap-4">
                     <label className="flex-1">
@@ -350,6 +457,29 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                     </label>
                   </div>
                 </section>
+
+                <section>
+                  <div className="mb-4 text-xs font-medium text-gray-400 dark:text-gray-500">新增自定义</div>
+                  <div className="flex gap-2">
+                    <label className="flex-1">
+                      <span className="mb-1.5 block text-xs text-gray-500 dark:text-gray-400">名称</span>
+                      <input
+                        value={customPresetName}
+                        onChange={(e) => setCustomPresetName(e.target.value)}
+                        className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                        placeholder="例如 文章头图"
+                      />
+                    </label>
+                    <button
+                      onClick={handleSaveCustomPreset}
+                      disabled={!canSaveCustomPreset}
+                      className="mt-6 rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      添加
+                    </button>
+                  </div>
+                </section>
+
                 <div className="rounded-xl border border-gray-200/80 bg-gray-50/80 p-3 text-xs text-gray-600 dark:border-white/[0.05] dark:bg-white/[0.02] dark:text-gray-400">
                   <div className="flex items-start gap-2">
                     <svg className="mt-[2px] h-4 w-4 flex-shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
