@@ -757,6 +757,8 @@ export default function InputBar() {
     : `OpenAI 最大请求数量为 ${outputImageLimit}`
   const displaySize = isFalTextToImage && params.size === 'auto'
     ? DEFAULT_FAL_IMAGE_SIZE
+    : params.size === 'auto'
+    ? '1K / 2K 不固定'
     : normalizeImageSize(params.size) || DEFAULT_PARAMS.size
 
   const qualityOptions = isFalProvider

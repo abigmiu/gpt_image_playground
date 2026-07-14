@@ -8,7 +8,6 @@ import ViewportTooltip from './ViewportTooltip'
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
 const SIZE_LIMIT_TEXT = '由于模型限制，最终输出会自动规整到合法尺寸：\n宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。'
 const RATIOS = [
-  { label: 'Auto', value: 'auto' },
   { label: '1:1', value: '1:1' },
   { label: '3:2', value: '3:2' },
   { label: '2:3', value: '2:3' },
@@ -26,7 +25,7 @@ interface Props {
   allowAuto?: boolean
 }
 
-type Mode = 'ratio' | 'resolution'
+type Mode = 'ratio' | 'resolution' | 'unstable'
 
 function parseSize(size: string) {
   const match = size.match(/^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/)
@@ -83,14 +82,15 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   const currentPreset = findPresetForSize(currentSize)
   const currentParsedSize = parseSize(currentSize)
   const [mode, setMode] = useState<Mode>(() => {
-    if (!currentSize || currentSize === 'auto') return 'ratio'
+    if (currentSize === 'auto') return 'unstable'
+    if (!currentSize) return 'ratio'
     if (currentPreset) return 'ratio'
     return 'resolution'
   })
 
   // Ratio mode state
   const [tier, setTier] = useState<SizeTier>(currentPreset?.tier ?? '1K')
-  const [ratio, setRatio] = useState(currentSize === 'auto' && allowAuto ? 'auto' : (currentPreset?.ratio ?? (allowAuto ? '1:1' : '4:3')))
+  const [ratio, setRatio] = useState(currentPreset?.ratio ?? (allowAuto ? '1:1' : '4:3'))
   const [customRatio, setCustomRatio] = useState('16:9')
 
   // Resolution mode state
@@ -99,6 +99,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   const [customPresetName, setCustomPresetName] = useState('')
   const [customPresets, setCustomPresets] = useState<SizePreset[]>([])
   const [pricing, setPricing] = useState<Sub2ApiPlaygroundPricing | null>(null)
+  const [unstableHintVisible, setUnstableHintVisible] = useState(false)
 
   const [hintVisible, setHintVisible] = useState(false)
   const hintTimerRef = useRef<number | null>(null)
@@ -139,8 +140,9 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
   )
 
   const previewSize = useMemo(() => {
+    if (mode === 'unstable') return 'auto'
+
     if (mode === 'ratio') {
-      if (ratio === 'auto') return 'auto'
       const size = calculateImageSize(tier, activeRatio)
       return size ? normalizeImageSize(size) : ''
     }
@@ -259,7 +261,9 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">设置图像尺寸</h3>
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">当前：{currentSize || 'auto'}</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              当前：{currentSize === 'auto' ? '1K / 2K 不固定' : (currentSize || 'auto')}
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -286,11 +290,38 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
             >
               自定义宽高
             </button>
+            {allowAuto && (
+              <div className={`flex flex-1 items-center rounded-lg transition ${mode === 'unstable' ? 'bg-white text-amber-600 shadow-sm dark:bg-gray-700 dark:text-amber-300' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}>
+                <button
+                  className="min-w-0 flex-1 py-1 pl-1 text-xs font-medium leading-4"
+                  onClick={() => setMode('unstable')}
+                >
+                  <span className="block">1K / 2K</span>
+                  <span className="block">不固定</span>
+                </button>
+                <div className="relative mr-1 flex items-center">
+                  <button
+                    type="button"
+                    className="rounded p-0.5 text-amber-500 transition hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-500/10"
+                    aria-label="查看不固定尺寸说明"
+                    aria-expanded={unstableHintVisible}
+                    onClick={() => setUnstableHintVisible((visible) => !visible)}
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 4h.01M10.3 4.2l-7.1 12.3A2 2 0 004.9 19h14.2a2 2 0 001.7-2.5L13.7 4.2a2 2 0 00-3.4 0z" />
+                    </svg>
+                  </button>
+                  <ViewportTooltip visible={unstableHintVisible} className="w-56 text-center">
+                    分辨率与宽高比不可指定
+                  </ViewportTooltip>
+                </div>
+              </div>
+            )}
           </div>
 
           <div
             ref={scrollBoundaryRef}
-            className="h-[380px] max-h-[55vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-white/10 pr-1 -mr-1 pb-2"
+            className={`${mode === 'unstable' ? 'h-[120px]' : 'h-[380px]'} max-h-[55vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-white/10 pr-1 -mr-1 pb-2`}
           >
             {mode === 'ratio' && (
               <div className="space-y-5 animate-fade-in">
@@ -298,7 +329,11 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                   <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">基准分辨率</div>
                   <div className="grid grid-cols-3 gap-2">
                     {TIERS.map((item) => (
-                      <button key={item} className={`${buttonClass(tier === item)} flex flex-col items-center gap-0.5`} onClick={() => setTier(item)}>
+                      <button
+                        key={item}
+                        className={`${buttonClass(tier === item)} flex flex-col items-center gap-0.5`}
+                        onClick={() => setTier(item)}
+                      >
                         <span>{item}</span>
                         <span className="text-[11px] font-normal opacity-75">{formatSub2ApiPlaygroundPrice(pricing?.[item]?.price)}</span>
                       </button>
@@ -310,18 +345,6 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                   <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">图像比例</div>
                   <div className="grid grid-cols-4 gap-2">
                     {RATIOS.map((item) => {
-                      if (item.value === 'auto') {
-                        if (!allowAuto) return null
-                        return (
-                          <button
-                            key={item.value}
-                            className={`${buttonClass(ratio === item.value)} col-span-4`}
-                            onClick={() => setRatio(item.value)}
-                          >
-                            Auto
-                          </button>
-                        )
-                      }
                       const [w, h] = item.value.split(':').map(Number)
                       const isHorizontal = w > h
                       const isSquare = w === h
@@ -349,12 +372,6 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                     </button>
                   </div>
                 </section>
-
-                {ratio === 'auto' && (
-                  <div className="rounded-xl border border-gray-200/80 bg-gray-50/80 p-3 text-xs text-gray-600 dark:border-white/[0.05] dark:bg-white/[0.02] dark:text-gray-400">
-                    不向模型传递具体分辨率，由模型自己决定生成尺寸
-                  </div>
-                )}
 
                 {ratio === 'custom' && (
                   <label className="block animate-fade-in">
@@ -496,7 +513,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
             <div className="text-xs text-gray-400 dark:text-gray-500">将使用</div>
             <div className="mt-1 flex items-center gap-2">
               <span className="font-mono text-lg font-semibold text-gray-800 dark:text-gray-100">
-                {previewSize || '尺寸无效'}
+                {previewSize === 'auto' ? '1K / 2K 不固定' : (previewSize || '尺寸无效')}
               </span>
               {isClamped && (
                 <div
