@@ -4,8 +4,6 @@ export interface Sub2ApiPlaygroundPricingItem {
   group_id?: number
   group_name?: string
   price?: number | null
-  price_1k?: number | null
-  price_2k?: number | null
 }
 
 export type Sub2ApiPlaygroundPricing = Record<Sub2ApiPlaygroundPricingTier, Sub2ApiPlaygroundPricingItem>

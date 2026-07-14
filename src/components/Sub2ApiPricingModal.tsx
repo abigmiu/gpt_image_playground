@@ -87,17 +87,9 @@ export default function Sub2ApiPricingModal({ onClose }: Sub2ApiPricingModalProp
                         <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{item.group_name}</div>
                       ) : null}
                     </div>
-                    {tier === 'UNSTABLE' ? (
-                      <div className="shrink-0 text-right text-sm font-semibold text-gray-900 dark:text-white">
-                        <span>1K {formatSub2ApiPlaygroundPrice(item?.price_1k)}</span>
-                        <span className="mx-1 text-gray-400">/</span>
-                        <span>2K {formatSub2ApiPlaygroundPrice(item?.price_2k)}</span>
-                      </div>
-                    ) : (
-                      <div className="shrink-0 text-right text-base font-semibold text-gray-900 dark:text-white">
-                        {formatSub2ApiPlaygroundPrice(item?.price)}
-                      </div>
-                    )}
+                    <div className="shrink-0 text-right text-base font-semibold text-gray-900 dark:text-white">
+                      {formatSub2ApiPlaygroundPrice(item?.price)}
+                    </div>
                   </div>
                 )
               })}
