@@ -507,6 +507,16 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                 </div>
               </div>
             )}
+
+            {mode === 'unstable' && (
+              <div className="rounded-xl border border-gray-200/70 bg-white/60 px-3 py-3 text-center text-sm dark:border-white/[0.08] dark:bg-white/[0.03] animate-fade-in">
+                <span className="font-semibold text-gray-800 dark:text-gray-100">价格</span>
+                <span className="mx-2 text-gray-400">·</span>
+                <span className="text-gray-600 dark:text-gray-300">1K {formatSub2ApiPlaygroundPrice(pricing?.UNSTABLE?.price_1k)}</span>
+                <span className="mx-1 text-gray-400">/</span>
+                <span className="text-gray-600 dark:text-gray-300">2K {formatSub2ApiPlaygroundPrice(pricing?.UNSTABLE?.price_2k)}</span>
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl bg-gray-50 px-4 py-3 dark:bg-white/[0.03]">

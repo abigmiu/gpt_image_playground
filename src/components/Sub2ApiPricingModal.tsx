@@ -11,7 +11,7 @@ interface Sub2ApiPricingModalProps {
   onClose: () => void
 }
 
-const TIERS: Sub2ApiPlaygroundPricingTier[] = ['1K', '2K', '4K']
+const TIERS: Sub2ApiPlaygroundPricingTier[] = ['1K', '2K', '4K', 'UNSTABLE']
 
 export default function Sub2ApiPricingModal({ onClose }: Sub2ApiPricingModalProps) {
   const modalRef = useRef<HTMLDivElement>(null)
@@ -80,14 +80,24 @@ export default function Sub2ApiPricingModal({ onClose }: Sub2ApiPricingModalProp
                     className="flex items-center justify-between rounded-2xl border border-gray-200/70 bg-gray-50/80 px-4 py-3 dark:border-white/[0.08] dark:bg-white/[0.03]"
                   >
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{tier}</div>
+                      <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        {tier === 'UNSTABLE' ? '1K / 2K 不固定' : tier}
+                      </div>
                       {item?.group_name ? (
                         <div className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{item.group_name}</div>
                       ) : null}
                     </div>
-                    <div className="shrink-0 text-right text-base font-semibold text-gray-900 dark:text-white">
-                      {formatSub2ApiPlaygroundPrice(item?.price)}
-                    </div>
+                    {tier === 'UNSTABLE' ? (
+                      <div className="shrink-0 text-right text-sm font-semibold text-gray-900 dark:text-white">
+                        <span>1K {formatSub2ApiPlaygroundPrice(item?.price_1k)}</span>
+                        <span className="mx-1 text-gray-400">/</span>
+                        <span>2K {formatSub2ApiPlaygroundPrice(item?.price_2k)}</span>
+                      </div>
+                    ) : (
+                      <div className="shrink-0 text-right text-base font-semibold text-gray-900 dark:text-white">
+                        {formatSub2ApiPlaygroundPrice(item?.price)}
+                      </div>
+                    )}
                   </div>
                 )
               })}
