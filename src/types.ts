@@ -150,6 +150,8 @@ export interface InputImage {
   dataUrl: string
   /** 远端可复用图片 URL，用于编辑等场景避免重复上传 */
   fileUrl?: string
+  /** fileUrl 上传成功时间（ms），用于判断 URL 是否仍在有效期内 */
+  fileUrlUploadedAt?: number
   /** 当前上传状态 */
   uploadStatus?: 'idle' | 'signing' | 'uploading' | 'error'
   /** 上传失败信息 */
@@ -301,6 +303,8 @@ export interface StoredImage {
   id: string
   dataUrl: string
   fileUrl?: string
+  /** fileUrl 上传成功时间（ms），用于判断 URL 是否仍在有效期内 */
+  fileUrlUploadedAt?: number
   /** 图片首次存储时间（ms） */
   createdAt?: number
   /** 图片来源：用户上传 / API 生成 / 遮罩 */

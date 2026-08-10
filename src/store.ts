@@ -81,6 +81,7 @@ const CUSTOM_RECOVERY_POLL_MS = 10_000
 const SUPPORT_PROMPT_IMAGE_THRESHOLD = 50
 const AGENT_INPUT_DRAFT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000
 const AGENT_ROUND_IMAGE_MENTION_RE = /@(?:第)?(\d+)轮图(\d+)/g
+const PLAYGROUND_UPLOAD_URL_TTL_MS = 24 * 60 * 60 * 1000
 const falRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const customRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const openAIWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -677,13 +678,13 @@ export function getPersistedState(state: AppState) {
     ...(settings.persistInputOnRestart && (state.appMode === 'gallery' || galleryInputDraft)
       ? {
           prompt: galleryInputDraft?.prompt ?? '',
-          inputImages: galleryInputDraft?.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl })) ?? [],
+          inputImages: galleryInputDraft?.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl, fileUrlUploadedAt: img.fileUrlUploadedAt })) ?? [],
         }
       : {}),
     dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
     appMode: state.appMode,
     galleryInputDraft: settings.persistInputOnRestart && galleryInputDraft
-      ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl })) }
+      ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl, fileUrlUploadedAt: img.fileUrlUploadedAt })) }
       : null,
     ...(agentConversationMigrationPending && !agentConversationPersistenceReady
       ? { agentConversations: getPersistableAgentConversations(state.agentConversations) }
@@ -975,6 +976,7 @@ function normalizeInputImages(value: unknown): InputImage[] {
         id: img.id,
         dataUrl: typeof img.dataUrl === 'string' ? img.dataUrl : '',
         fileUrl: typeof img.fileUrl === 'string' && img.fileUrl.trim() ? img.fileUrl : undefined,
+        fileUrlUploadedAt: typeof img.fileUrlUploadedAt === 'number' ? img.fileUrlUploadedAt : undefined,
       }
     })
     .filter((img): img is InputImage => img != null)
@@ -1139,7 +1141,7 @@ function getPersistableAgentInputDrafts(state: AppState) {
     if (!conversationIds.has(conversationId) || isEmptyAgentInputDraft(draft)) continue
     persistable[conversationId] = {
       ...copyAgentInputDraft(draft),
-      inputImages: draft.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl })),
+      inputImages: draft.inputImages.map((img) => ({ id: img.id, dataUrl: '', fileUrl: img.fileUrl, fileUrlUploadedAt: img.fileUrlUploadedAt })),
     }
   }
   return persistable
@@ -2057,14 +2059,27 @@ async function ensurePlaygroundInputImageUrl(imageId: string, stateImage?: Input
   const currentDataUrl = liveImage?.dataUrl || storedImage?.dataUrl
   if (!currentDataUrl) throw new Error('输入图片已不存在')
 
-  if (currentUrl && await canAccessPlaygroundImageUrl(currentUrl)) {
+  const uploadedAt = liveImage?.fileUrlUploadedAt || storedImage?.fileUrlUploadedAt
+  if (currentUrl && uploadedAt && Date.now() - uploadedAt < PLAYGROUND_UPLOAD_URL_TTL_MS) {
     useStore.getState().updateInputImage(imageId, {
       fileUrl: currentUrl,
+      fileUrlUploadedAt: uploadedAt,
+      uploadStatus: 'idle',
+      uploadError: null,
+    })
+    return currentUrl
+  }
+
+  if (currentUrl && await canAccessPlaygroundImageUrl(currentUrl)) {
+    const now = Date.now()
+    useStore.getState().updateInputImage(imageId, {
+      fileUrl: currentUrl,
+      fileUrlUploadedAt: now,
       uploadStatus: 'idle',
       uploadError: null,
     })
     if (storedImage && storedImage.fileUrl !== currentUrl) {
-      await putImage({ ...storedImage, fileUrl: currentUrl })
+      await putImage({ ...storedImage, fileUrl: currentUrl, fileUrlUploadedAt: now })
     }
     return currentUrl
   }
@@ -2081,13 +2096,15 @@ async function ensurePlaygroundInputImageUrl(imageId: string, stateImage?: Input
         uploadError: null,
       })
     })
+    const now = Date.now()
     useStore.getState().updateInputImage(imageId, {
       fileUrl,
+      fileUrlUploadedAt: now,
       uploadStatus: 'idle',
       uploadError: null,
     })
     const latestStored = storedImage ?? await getImage(imageId)
-    if (latestStored) await putImage({ ...latestStored, fileUrl })
+    if (latestStored) await putImage({ ...latestStored, fileUrl, fileUrlUploadedAt: now })
     return fileUrl
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -2290,7 +2307,7 @@ export async function initStore() {
     }
     const storedImage = await getImage(img.id)
     if (storedImage?.dataUrl) {
-      restoredInputImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl })
+      restoredInputImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl, fileUrlUploadedAt: storedImage.fileUrlUploadedAt })
       cacheImage(img.id, storedImage.dataUrl)
     }
   }
@@ -2308,7 +2325,7 @@ export async function initStore() {
       }
       const storedImage = await getImage(img.id)
       if (storedImage?.dataUrl) {
-        restoredGalleryImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl })
+        restoredGalleryImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl, fileUrlUploadedAt: storedImage.fileUrlUploadedAt })
         cacheImage(img.id, storedImage.dataUrl)
       }
     }
@@ -2347,7 +2364,7 @@ export async function initStore() {
       }
       const storedImage = await getImage(img.id)
       if (storedImage?.dataUrl) {
-        restoredDraftImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl })
+        restoredDraftImages.push({ ...img, dataUrl: storedImage.dataUrl, fileUrl: storedImage.fileUrl, fileUrlUploadedAt: storedImage.fileUrlUploadedAt })
         cacheImage(img.id, storedImage.dataUrl)
       }
     }
@@ -2895,7 +2912,7 @@ async function storeTaskOutputImages(task: TaskRecord, images: string[], rawImag
       const rawImageUrl = rawImageUrls?.[index]
       if (rawImageUrl) {
         const storedImage = await getImage(stored.id)
-        if (storedImage) await putImage({ ...storedImage, fileUrl: rawImageUrl })
+        if (storedImage) await putImage({ ...storedImage, fileUrl: rawImageUrl, fileUrlUploadedAt: Date.now() })
       }
       outputIds.push(stored.id)
       outputDataUrls.push(outputDataUrl)
@@ -4855,7 +4872,7 @@ export async function reuseConfig(task: TaskRecord) {
     const dataUrl = await ensureImageCached(imgId)
     if (!dataUrl) continue
     const storedImage = await getImage(imgId)
-    imgs.push({ id: imgId, dataUrl, fileUrl: storedImage?.fileUrl })
+    imgs.push({ id: imgId, dataUrl, fileUrl: storedImage?.fileUrl, fileUrlUploadedAt: storedImage?.fileUrlUploadedAt })
   }
   setInputImages(imgs)
   setPrompt(task.prompt)
@@ -4907,14 +4924,14 @@ export async function editOutputs(task: TaskRecord) {
     const storedImage = await getImage(imgId)
     if (existing) {
       if (!existing.fileUrl && storedImage?.fileUrl) {
-        updateInputImage(imgId, { fileUrl: storedImage.fileUrl })
+        updateInputImage(imgId, { fileUrl: storedImage.fileUrl, fileUrlUploadedAt: storedImage.fileUrlUploadedAt })
         updated++
       }
       continue
     }
     const dataUrl = await ensureImageCached(imgId)
     if (!dataUrl) continue
-    addInputImage({ id: imgId, dataUrl, fileUrl: storedImage?.fileUrl })
+    addInputImage({ id: imgId, dataUrl, fileUrl: storedImage?.fileUrl, fileUrlUploadedAt: storedImage?.fileUrlUploadedAt })
     added++
   }
   const message = updated > 0 && added === 0
@@ -5344,14 +5361,16 @@ export async function createInputImageFromFile(file: File): Promise<InputImage |
     },
   })
     .then((fileUrl) => {
+      const now = Date.now()
       useStore.getState().updateInputImage(id, {
         fileUrl,
+        fileUrlUploadedAt: now,
         uploadStatus: 'idle',
         uploadError: null,
       })
       void getImage(id).then((stored) => {
         if (!stored) return
-        void putImage({ ...stored, fileUrl })
+        void putImage({ ...stored, fileUrl, fileUrlUploadedAt: now })
       })
     })
     .catch((err) => {
@@ -5386,13 +5405,15 @@ export async function retryInputImageUpload(imageId: string): Promise<void> {
         })
       },
     })
+    const now = Date.now()
     useStore.getState().updateInputImage(imageId, {
       fileUrl,
+      fileUrlUploadedAt: now,
       uploadStatus: 'idle',
       uploadError: null,
     })
     const stored = await getImage(imageId)
-    if (stored) await putImage({ ...stored, fileUrl })
+    if (stored) await putImage({ ...stored, fileUrl, fileUrlUploadedAt: now })
     useStore.getState().showToast('图片上传成功', 'success')
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -5430,14 +5451,16 @@ export async function addImageFromUrl(src: string): Promise<void> {
     },
   })
     .then((fileUrl) => {
+      const now = Date.now()
       useStore.getState().updateInputImage(id, {
         fileUrl,
+        fileUrlUploadedAt: now,
         uploadStatus: 'idle',
         uploadError: null,
       })
       void getImage(id).then((stored) => {
         if (!stored) return
-        void putImage({ ...stored, fileUrl })
+        void putImage({ ...stored, fileUrl, fileUrlUploadedAt: now })
       })
     })
     .catch((err) => {
