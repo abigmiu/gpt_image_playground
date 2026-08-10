@@ -2057,11 +2057,6 @@ async function ensurePlaygroundInputImageUrl(imageId: string, stateImage?: Input
   const currentDataUrl = liveImage?.dataUrl || storedImage?.dataUrl
   if (!currentDataUrl) throw new Error('输入图片已不存在')
 
-  useStore.getState().updateInputImage(imageId, {
-    uploadStatus: 'signing',
-    uploadError: null,
-  })
-
   if (currentUrl && await canAccessPlaygroundImageUrl(currentUrl)) {
     useStore.getState().updateInputImage(imageId, {
       fileUrl: currentUrl,
@@ -2073,6 +2068,11 @@ async function ensurePlaygroundInputImageUrl(imageId: string, stateImage?: Input
     }
     return currentUrl
   }
+
+  useStore.getState().updateInputImage(imageId, {
+    uploadStatus: 'signing',
+    uploadError: null,
+  })
 
   try {
     const fileUrl = await uploadInputImageDataUrl(imageId, currentDataUrl, () => {
@@ -4853,9 +4853,9 @@ export async function reuseConfig(task: TaskRecord) {
   const imgs: InputImage[] = []
   for (const imgId of task.inputImageIds) {
     const dataUrl = await ensureImageCached(imgId)
-    if (dataUrl) {
-      imgs.push({ id: imgId, dataUrl })
-    }
+    if (!dataUrl) continue
+    const storedImage = await getImage(imgId)
+    imgs.push({ id: imgId, dataUrl, fileUrl: storedImage?.fileUrl })
   }
   setInputImages(imgs)
   setPrompt(task.prompt)
