@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { calculateImageSize, classifyImageSizeTier, normalizeImageSize, parseRatio, type SizeTier } from '../lib/size'
+import { calculateImageSize, classifyImageSizeTier, normalizeCodexCliImageSize, normalizeImageSize, parseRatio, type SizeTier } from '../lib/size'
 import { BUILTIN_SIZE_PRESETS, loadCustomSizePresets, saveCustomSizePresets, type SizePreset } from '../lib/customSizePresets'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { formatSub2ApiPlaygroundPrice, getSub2ApiPlaygroundPricing, type Sub2ApiPlaygroundPricing } from '../lib/sub2apiPlaygroundPricing'
@@ -7,6 +7,7 @@ import ViewportTooltip from './ViewportTooltip'
 
 const TIERS: SizeTier[] = ['1K', '2K', '4K']
 const SIZE_LIMIT_TEXT = '由于模型限制，最终输出会自动规整到合法尺寸：\n宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。'
+const CODEX_CLI_SIZE_LIMIT_TEXT = '由于模型和 Codex CLI 限制，不符合要求的分辨率会被自动规整：\n宽高均为 16 的倍数，宽高比不超过 3:1，分辨率不超过 1K。'
 const RATIOS = [
   { label: '1:1', value: '1:1' },
   { label: '3:2', value: '3:2' },
@@ -23,6 +24,7 @@ interface Props {
   onSelect: (size: string) => void
   onClose: () => void
   allowAuto?: boolean
+  codexCli?: boolean
 }
 
 type Mode = 'ratio' | 'resolution' | 'unstable'
@@ -52,7 +54,9 @@ function findPresetForSize(size: string) {
   return null
 }
 
-export default function SizePickerModal({ currentSize, onSelect, onClose, allowAuto = true }: Props) {
+export default function SizePickerModal({ currentSize, onSelect, onClose, allowAuto = true, codexCli = false }: Props) {
+  const normalizeSize = codexCli ? normalizeCodexCliImageSize : normalizeImageSize
+  const sizeLimitText = codexCli ? CODEX_CLI_SIZE_LIMIT_TEXT : SIZE_LIMIT_TEXT
   const modalRef = useRef<HTMLDivElement>(null)
   const scrollBoundaryRef = useRef<HTMLDivElement>(null)
   const mouseDownTargetRef = useRef<EventTarget | null>(null)
@@ -103,9 +107,12 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
 
   const [hintVisible, setHintVisible] = useState(false)
   const hintTimerRef = useRef<number | null>(null)
+  const [tierHint, setTierHint] = useState<SizeTier | null>(null)
+  const tierHintTimerRef = useRef<number | null>(null)
 
   useEffect(() => () => {
     if (hintTimerRef.current != null) window.clearTimeout(hintTimerRef.current)
+    if (tierHintTimerRef.current != null) window.clearTimeout(tierHintTimerRef.current)
   }, [])
 
   useEffect(() => {
@@ -144,20 +151,20 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
 
     if (mode === 'ratio') {
       const size = calculateImageSize(tier, activeRatio)
-      return size ? normalizeImageSize(size) : ''
+      return size ? normalizeSize(size) : ''
     }
 
     if (mode === 'resolution') {
       const w = parseInt(customW, 10)
       const h = parseInt(customH, 10)
       if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-        return normalizeImageSize(`${w}x${h}`)
+        return normalizeSize(`${w}x${h}`)
       }
       return ''
     }
 
     return ''
-  }, [mode, tier, activeRatio, customW, customH])
+  }, [mode, tier, activeRatio, customW, customH, normalizeSize])
 
   const isClamped = useMemo(() => {
     if (!previewSize || previewSize === 'auto') return false
@@ -328,16 +335,32 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                 <section>
                   <div className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">基准分辨率</div>
                   <div className="grid grid-cols-3 gap-2">
-                    {TIERS.map((item) => (
-                      <button
-                        key={item}
-                        className={`${buttonClass(tier === item)} flex flex-col items-center gap-0.5`}
-                        onClick={() => setTier(item)}
-                      >
-                        <span>{item}</span>
-                        <span className="text-[11px] font-normal opacity-75">{formatSub2ApiPlaygroundPrice(pricing?.[item]?.price)}</span>
-                      </button>
-                    ))}
+                    {TIERS.map((item) => {
+                      const disabled = codexCli && item !== '1K'
+                      return (
+                        <div
+                          key={item}
+                          className="relative"
+                          onMouseEnter={() => {
+                            if (tierHintTimerRef.current != null) window.clearTimeout(tierHintTimerRef.current)
+                            if (disabled) setTierHint(item)
+                          }}
+                          onMouseLeave={() => setTierHint(null)}
+                        >
+                          <button
+                            className={`${buttonClass(tier === item)} flex w-full flex-col items-center gap-0.5 disabled:cursor-not-allowed disabled:opacity-40`}
+                            onClick={() => setTier(item)}
+                            disabled={disabled}
+                          >
+                            <span>{item}</span>
+                            <span className="text-[11px] font-normal opacity-75">{formatSub2ApiPlaygroundPrice(pricing?.[item]?.price)}</span>
+                          </button>
+                          <ViewportTooltip visible={tierHint === item} className="w-52 text-center">
+                            Codex CLI 不支持 1K 以上的分辨率
+                          </ViewportTooltip>
+                        </div>
+                      )
+                    })}
                   </div>
                 </section>
 
@@ -502,7 +525,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                     <svg className="mt-[2px] h-4 w-4 flex-shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <div className="whitespace-pre-line leading-relaxed">{SIZE_LIMIT_TEXT}</div>
+                    <div className="whitespace-pre-line leading-relaxed">{sizeLimitText}</div>
                   </div>
                 </div>
               </div>
@@ -537,7 +560,7 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <ViewportTooltip visible={hintVisible} className="w-56 whitespace-pre-line text-center">
-                    {SIZE_LIMIT_TEXT}
+                    {sizeLimitText}
                   </ViewportTooltip>
                 </div>
               )}

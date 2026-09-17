@@ -50,4 +50,85 @@ describe('parameter compatibility', () => {
     expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: 'auto' }, settings).size).toBe('1360x1024')
     expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: 'auto' }, settings, { hasInputImages: true }).size).toBe('auto')
   })
+
+  it('limits Codex CLI custom sizes to 1K while preserving auto', () => {
+    const profile = createDefaultOpenAIProfile({ apiKey: 'test-key', codexCli: true })
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      profiles: [profile],
+      activeProfileId: profile.id,
+    })
+
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: '2048x2048' }, settings).size).toBe('1024x1024')
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: 'auto' }, settings).size).toBe('auto')
+  })
+
+  it('applies Codex CLI parameter limits to custom providers', () => {
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      customProviders: [{
+        id: 'custom-provider',
+        name: 'Custom Provider',
+        submit: { path: 'images/generations' },
+      }],
+      profiles: [{
+        ...createDefaultOpenAIProfile(),
+        provider: 'custom-provider',
+        codexCli: true,
+      }],
+    })
+
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: '2048x2048', quality: 'high' }, settings)).toMatchObject({
+      size: '1024x1024',
+      quality: DEFAULT_PARAMS.quality,
+    })
+  })
+
+  it('does not apply Codex CLI parameter limits to fal.ai', () => {
+    const profile = createDefaultFalProfile({ codexCli: true })
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      codexCli: true,
+      profiles: [profile],
+      activeProfileId: profile.id,
+    })
+
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, size: '2048x2048' }, settings).size).toBe('2048x2048')
+  })
+
+  it.each(['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'] as const)('keeps 2.5 quality levels for %s', (model) => {
+    const profile = createDefaultOpenAIProfile({ model })
+    const settings = normalizeSettings({ ...DEFAULT_SETTINGS, profiles: [profile] })
+
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, quality: 'xhigh' }, settings).quality).toBe('xhigh')
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, quality: 'max' }, settings).quality).toBe('max')
+  })
+
+  it.each(['openai/gpt-image-2.5/sunburst', 'openai/gpt-image-2.5/flare'] as const)('keeps fal.ai 2.5 quality levels for %s', (model) => {
+    const profile = createDefaultFalProfile({ model })
+    const settings = normalizeSettings({ ...DEFAULT_SETTINGS, profiles: [profile], activeProfileId: profile.id })
+
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, quality: 'xhigh' }, settings).quality).toBe('xhigh')
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, quality: 'max' }, settings).quality).toBe('max')
+  })
+
+  it.each(['vendor/gpt-image-2.5-custom', 'my-gpt-image-2.5-proxy'])('keeps 2.5 quality levels for a custom provider model %s', (model) => {
+    const profile = { ...createDefaultOpenAIProfile({ model }), provider: 'custom-provider' }
+    const settings = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      customProviders: [{ id: 'custom-provider', name: 'Custom Provider', submit: { path: 'images/generations' } }],
+      profiles: [profile],
+      activeProfileId: profile.id,
+    })
+
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, quality: 'xhigh' }, settings).quality).toBe('xhigh')
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, quality: 'max' }, settings).quality).toBe('max')
+  })
+
+  it('falls back to high when an older image model receives a 2.5 quality level', () => {
+    const profile = createDefaultOpenAIProfile({ model: 'gpt-image-2' })
+    const settings = normalizeSettings({ ...DEFAULT_SETTINGS, profiles: [profile] })
+
+    expect(normalizeParamsForSettings({ ...DEFAULT_PARAMS, quality: 'max' }, settings).quality).toBe('high')
+  })
 })

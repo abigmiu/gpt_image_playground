@@ -1,336 +1,35 @@
 import { useRef, useEffect, useCallback, useState, useMemo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { ALL_FAVORITES_COLLECTION_ID, deleteFavoriteCollection, getTaskFavoriteCollectionIds, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, getCachedImage, ensureImageCached, getActiveAgentRounds, retryInputImageUpload, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
+import { deleteFavoriteCollection, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, createInputImageFromFile, deleteImageIfUnreferenced, removeMultipleTasks, retryInputImageUpload, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
+import { getActiveAgentRounds } from '../lib/agentConversationState'
 import { getActiveApiProfile, getAgentImageApiProfile, normalizeSettings } from '../lib/apiProfiles'
+import { getImageGenerationModel, isGptImage25Model } from '../lib/imageModels'
+import { ensureImageCached, getCachedImage } from '../lib/imageCache'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
-import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, getSelectedTextMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
-import { normalizeImageSize } from '../lib/size'
+import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
+import { normalizeCodexCliImageSize, normalizeImageSize } from '../lib/size'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { getSafeBoundingClientRect } from '../lib/domRect'
 import { collectAgentRoundOutputImageSlots } from '../lib/agentImageReferences'
+import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds } from '../lib/favoriteState'
+import { getContentEditableCursor, getContentEditablePlainText, getContentEditableSelection, getMentionTagHtml, setContentEditableCursor, setContentEditableSelection, syncMentionTagSelection } from '../lib/contentEditableMentions'
 import { useHintTooltip } from '../hooks/useHintTooltip'
 import { downloadImageEntriesAsZip, downloadImageIds, formatExportFileTime, getTaskOutputImageZipEntries } from '../lib/downloadImages'
 import SizePickerModal from './SizePickerModal'
-import { CloseIcon } from './icons'
+import { CloseIcon, CollapseIcon, ExpandIcon } from './icons'
 import ButtonTooltip from './input/buttonTooltip'
 import DragUploadOverlay from './input/dragUploadOverlay'
 import InputBatchBars from './input/inputBatchBars'
 import InputParamsPanel from './input/inputParamsPanel'
 
-
-function getMentionTagTextLength(el: Element) {
-  return el.textContent?.length ?? 0
-}
-
-function getNodeVisibleTextLength(node: Node): number {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent?.length ?? 0
-  if (node instanceof HTMLElement && node.classList.contains('mention-tag')) {
-    return getMentionTagTextLength(node)
-  }
-  return Array.from(node.childNodes).reduce((sum, child) => sum + getNodeVisibleTextLength(child), 0)
-}
-
-function getVisibleOffsetBeforeNode(root: HTMLElement, target: Node): number {
-  let offset = 0
-  let found = false
-
-  const walk = (node: Node) => {
-    if (found) return
-    if (node === target) {
-      found = true
-      return
-    }
-    if (node.nodeType === Node.TEXT_NODE) {
-      offset += node.textContent?.length ?? 0
-      return
-    }
-    if (node instanceof HTMLElement && node.classList.contains('mention-tag')) {
-      offset += getMentionTagTextLength(node)
-      return
-    }
-    node.childNodes.forEach(walk)
-  }
-
-  root.childNodes.forEach(walk)
-  return offset
-}
-
-function getMentionTagForBoundary(root: HTMLElement, container: Node) {
-  const el = container.nodeType === Node.ELEMENT_NODE
-    ? container as Element
-    : container.parentElement
-  const tag = el?.closest('.mention-tag')
-  return tag && root.contains(tag) ? tag : null
-}
-
-function getBoundaryOffsetInMention(tag: Element, container: Node, offset: number) {
-  try {
-    const range = document.createRange()
-    range.selectNodeContents(tag)
-    range.setEnd(container, offset)
-    return range.toString().length
-  } catch {
-    return getMentionTagTextLength(tag)
-  }
-}
-
-function getContentEditableBoundaryOffset(
-  root: HTMLElement,
-  container: Node,
-  offset: number,
-  edge: 'start' | 'end',
-  collapsed: boolean,
-) {
-  if (container === root) {
-    let visibleOffset = 0
-    for (const child of Array.from(root.childNodes).slice(0, offset)) {
-      visibleOffset += getNodeVisibleTextLength(child)
-    }
-    return visibleOffset
-  }
-
-  if (!root.contains(container)) {
-    // 处理输入框外的选区边界（如 Ctrl+A）
-    const position = root.compareDocumentPosition(container)
-    if (position & Node.DOCUMENT_POSITION_PRECEDING) return 0
-    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return root.textContent?.length ?? 0
-
-    // 根据父容器偏移量判断在输入框前后
-    if (container.contains(root)) {
-      const children = Array.from(container.childNodes)
-      const rootIndex = children.indexOf(root as any)
-      return offset <= rootIndex ? 0 : root.textContent?.length ?? 0
-    }
-    return edge === 'start' ? 0 : root.textContent?.length ?? 0
-  }
-
-  const mentionTag = getMentionTagForBoundary(root, container)
-  if (mentionTag) {
-    const mentionStart = getVisibleOffsetBeforeNode(root, mentionTag)
-    const mentionLength = getMentionTagTextLength(mentionTag)
-    if (!collapsed) return edge === 'start' ? mentionStart : mentionStart + mentionLength
-    const mentionOffset = getBoundaryOffsetInMention(mentionTag, container, offset)
-    return mentionStart + (mentionOffset < mentionLength / 2 ? 0 : mentionLength)
-  }
-
-  if (container.nodeType === Node.TEXT_NODE) {
-    return getVisibleOffsetBeforeNode(root, container) + offset
-  }
-
-  const element = container.nodeType === Node.ELEMENT_NODE ? container as Element : null
-  if (element) {
-    let visibleOffset = element === root ? 0 : getVisibleOffsetBeforeNode(root, element)
-    for (const child of Array.from(element.childNodes).slice(0, offset)) {
-      visibleOffset += getNodeVisibleTextLength(child)
-    }
-    return visibleOffset
-  }
-
-  return root.textContent?.length ?? 0
-}
-
-/** 获取 contentEditable 中光标的纯文本偏移量 */
-function getContentEditableCursor(el: HTMLElement): number {
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) return el.textContent?.length ?? 0
-  try {
-    const range = sel.getRangeAt(0)
-    if (!el.contains(range.startContainer)) return el.textContent?.length ?? 0
-    return getContentEditableBoundaryOffset(el, range.startContainer, range.startOffset, 'start', range.collapsed)
-  } catch {
-    return el.textContent?.length ?? 0
-  }
-}
-
-function getContentEditableSelection(el: HTMLElement): { start: number; end: number } {
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) {
-    const end = el.textContent?.length ?? 0
-    return { start: end, end }
-  }
-  try {
-    const range = sel.getRangeAt(0)
-    const start = getContentEditableBoundaryOffset(el, range.startContainer, range.startOffset, 'start', range.collapsed)
-    const end = range.collapsed
-      ? start
-      : getContentEditableBoundaryOffset(el, range.endContainer, range.endOffset, 'end', false)
-    return { start, end }
-  } catch {
-    const end = el.textContent?.length ?? 0
-    return { start: end, end }
-  }
-}
-
-function getContentEditablePlainText(el: HTMLElement): string {
-  let text = ''
-  const appendNodeText = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += node.textContent ?? ''
-      return
-    }
-    if (node instanceof HTMLElement && node.classList.contains('mention-tag')) {
-      text += node.dataset.mentionText ?? node.textContent ?? ''
-      return
-    }
-    node.childNodes.forEach(appendNodeText)
-  }
-  el.childNodes.forEach(appendNodeText)
-  return text.replace(/\r\n?/g, '\n')
-}
-
-function escapeHtml(text: string) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-function getMentionTagHtml(text: string) {
-  return `<span contenteditable="false" class="mention-tag" data-mention-text="${escapeHtml(getSelectedTextMentionLabel(text))}">${escapeHtml(text)}</span>`
-}
-
-function syncMentionTagSelection(el: HTMLElement) {
-  const tags = el.querySelectorAll<HTMLElement>('.mention-tag')
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) {
-    tags.forEach((tag) => tag.classList.remove('selected'))
-    return
-  }
-
-  const range = sel.getRangeAt(0)
-  if (range.collapsed) {
-    tags.forEach((tag) => tag.classList.remove('selected'))
-    return
-  }
-
-  tags.forEach((tag) => {
-    let isSelected = false
-    try {
-      isSelected = range.intersectsNode(tag)
-    } catch {
-      isSelected = false
-    }
-    tag.classList.toggle('selected', isSelected)
-  })
-}
-
-/** 在 contentEditable 中设置光标到指定纯文本偏移量 */
-function setContentEditableCursor(el: HTMLElement, offset: number) {
-  const sel = window.getSelection()
-  if (!sel) return
-  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
-  let remaining = offset
-  let node: Text | null = null
-  while (walker.nextNode()) {
-    node = walker.currentNode as Text
-    const mentionTag = node.parentElement?.closest('.mention-tag')
-    if (mentionTag) {
-      if (remaining <= node.length) {
-        const range = document.createRange()
-        if (remaining < node.length / 2) {
-          range.setStartBefore(mentionTag)
-        } else {
-          range.setStartAfter(mentionTag)
-        }
-        range.collapse(true)
-        sel.removeAllRanges()
-        sel.addRange(range)
-        return
-      }
-      remaining -= node.length
-      continue
-    }
-    if (remaining <= node.length) {
-      const range = document.createRange()
-      range.setStart(node, remaining)
-      range.collapse(true)
-      sel.removeAllRanges()
-      sel.addRange(range)
-      return
-    }
-    remaining -= node.length
-  }
-  // 偏移超出则放至末尾
-  if (node) {
-    const range = document.createRange()
-    range.setStart(node, node.length)
-    range.collapse(true)
-    sel.removeAllRanges()
-    sel.addRange(range)
-  }
-}
-
-function setContentEditableSelection(el: HTMLElement, start: number, end: number) {
-  const sel = window.getSelection()
-  if (!sel) return
-
-  type Boundary =
-    | { type: 'offset'; node: Node; offset: number }
-    | { type: 'before'; element: Element }
-    | { type: 'after'; element: Element }
-
-  const findBoundary = (targetOffset: number, edge: 'start' | 'end'): Boundary => {
-    let remaining = targetOffset
-    let lastBoundary: Boundary = { type: 'offset', node: el, offset: 0 }
-
-    const walk = (current: Node): Boundary | null => {
-      if (current.nodeType === Node.TEXT_NODE) {
-        const node = current as Text
-        lastBoundary = { type: 'offset', node, offset: node.length }
-        if (remaining <= node.length) return { type: 'offset', node, offset: remaining }
-        remaining -= node.length
-        return null
-      }
-
-      if (current instanceof HTMLElement && current.classList.contains('mention-tag')) {
-        const length = getMentionTagTextLength(current)
-        if (remaining <= 0) return { type: 'before', element: current }
-        if (remaining < length) return edge === 'start' ? { type: 'before', element: current } : { type: 'after', element: current }
-        if (remaining === length) return { type: 'after', element: current }
-        remaining -= length
-        return null
-      }
-
-      for (const child of Array.from(current.childNodes)) {
-        const boundary = walk(child)
-        if (boundary) return boundary
-      }
-      return null
-    }
-
-    return walk(el) ?? lastBoundary
-  }
-
-  const applyBoundary = (range: Range, boundary: Boundary, target: 'start' | 'end') => {
-    if (boundary.type === 'before') {
-      target === 'start' ? range.setStartBefore(boundary.element) : range.setEndBefore(boundary.element)
-      return
-    }
-    if (boundary.type === 'after') {
-      target === 'start' ? range.setStartAfter(boundary.element) : range.setEndAfter(boundary.element)
-      return
-    }
-    target === 'start' ? range.setStart(boundary.node, boundary.offset) : range.setEnd(boundary.node, boundary.offset)
-  }
-
-  const startBoundary = findBoundary(start, 'start')
-  const endBoundary = findBoundary(end, 'end')
-  const range = document.createRange()
-  applyBoundary(range, startBoundary, 'start')
-  applyBoundary(range, endBoundary, 'end')
-  sel.removeAllRanges()
-  sel.addRange(range)
-}
-
 /** API 支持的最大参考图数量 */
 const API_MAX_IMAGES = 16
 
-function getFavoriteCollectionTasksForBatch(collectionId: string, tasks: TaskRecord[]) {
+function getFavoriteCollectionTasksForBatch(collectionId: string, tasks: TaskRecord[], defaultFavoriteCollectionId: string | null) {
   const favoriteTasks = tasks.filter((task) => task.isFavorite)
   if (collectionId === ALL_FAVORITES_COLLECTION_ID) return favoriteTasks
-  return favoriteTasks.filter((task) => getTaskFavoriteCollectionIds(task).includes(collectionId))
+  return favoriteTasks.filter((task) => getTaskFavoriteCollectionIds(task, defaultFavoriteCollectionId).includes(collectionId))
 }
 
 function delay(ms: number) {
@@ -390,13 +89,11 @@ export default function InputBar() {
   const setPrompt = useStore((s) => s.setPrompt)
   const inputImages = useStore((s) => s.inputImages)
   const addInputImage = useStore((s) => s.addInputImage)
-  const replaceInputImage = useStore((s) => s.replaceInputImage)
   const removeInputImage = useStore((s) => s.removeInputImage)
   const clearInputImages = useStore((s) => s.clearInputImages)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
   const settings = useStore((s) => s.settings)
-  const setSettings = useStore((s) => s.setSettings)
   const reusedTaskApiProfileId = useStore((s) => s.reusedTaskApiProfileId)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
@@ -410,6 +107,7 @@ export default function InputBar() {
   const clearFavoriteCollectionSelection = useStore((s) => s.clearFavoriteCollectionSelection)
   const tasks = useStore((s) => s.tasks)
   const favoriteCollections = useStore((s) => s.favoriteCollections)
+  const defaultFavoriteCollectionId = useStore((s) => s.defaultFavoriteCollectionId)
   const agentConversations = useStore((s) => s.agentConversations)
   const activeAgentConversationId = useStore((s) => s.activeAgentConversationId)
   const filterStatus = useStore((s) => s.filterStatus)
@@ -425,12 +123,12 @@ export default function InputBar() {
     return sorted.filter((t) => {
       if (filterFavorite) {
         if (!t.isFavorite) return false
-        if (activeFavoriteCollectionId && activeFavoriteCollectionId !== ALL_FAVORITES_COLLECTION_ID && !getTaskFavoriteCollectionIds(t).includes(activeFavoriteCollectionId)) return false
+        if (activeFavoriteCollectionId && activeFavoriteCollectionId !== ALL_FAVORITES_COLLECTION_ID && !getTaskFavoriteCollectionIds(t, defaultFavoriteCollectionId).includes(activeFavoriteCollectionId)) return false
       }
       if (!taskMatchesFilterStatus(t, filterStatus)) return false
       return taskMatchesSearchQuery(t, q)
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId])
+  }, [tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId, defaultFavoriteCollectionId])
 
   const inCollectionOverview = filterFavorite && !activeFavoriteCollectionId
 
@@ -439,16 +137,16 @@ export default function InputBar() {
       {
         id: ALL_FAVORITES_COLLECTION_ID,
         name: '全部',
-        tasks: getFavoriteCollectionTasksForBatch(ALL_FAVORITES_COLLECTION_ID, tasks),
+        tasks: getFavoriteCollectionTasksForBatch(ALL_FAVORITES_COLLECTION_ID, tasks, defaultFavoriteCollectionId),
       },
       ...favoriteCollections.map((collection) => ({
         id: collection.id,
         name: collection.name,
         collection,
-        tasks: getFavoriteCollectionTasksForBatch(collection.id, tasks),
+        tasks: getFavoriteCollectionTasksForBatch(collection.id, tasks, defaultFavoriteCollectionId),
       })),
     ]
-  }, [favoriteCollections, tasks])
+  }, [defaultFavoriteCollectionId, favoriteCollections, tasks])
 
   const filteredFavoriteCollectionCards = useMemo(() => {
     if (!searchQuery.trim()) return favoriteCollectionCards
@@ -587,7 +285,7 @@ export default function InputBar() {
     const selectedCollectionIds = new Set(selectedCollections.map((collection) => collection.id))
     const imageCount = new Set(
       tasks
-        .filter((task) => getTaskFavoriteCollectionIds(task).some((id) => selectedCollectionIds.has(id)))
+        .filter((task) => getTaskFavoriteCollectionIds(task, defaultFavoriteCollectionId).some((id) => selectedCollectionIds.has(id)))
         .flatMap((task) => task.outputImages || []),
     ).size
     setConfirmDialog({
@@ -606,15 +304,13 @@ export default function InputBar() {
         clearFavoriteCollectionSelection()
       },
     })
-  }, [clearFavoriteCollectionSelection, favoriteCollections, selectedFavoriteCollectionIds, setConfirmDialog, showToast, tasks])
+  }, [clearFavoriteCollectionSelection, defaultFavoriteCollectionId, favoriteCollections, selectedFavoriteCollectionIds, setConfirmDialog, showToast, tasks])
 
   const maskDraft = useStore((s) => s.maskDraft)
-  const setMaskEditorImageId = useStore((s) => s.setMaskEditorImageId)
   const moveInputImage = useStore((s) => s.moveInputImage)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
-  const replaceFileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const imagesRef = useRef<HTMLDivElement>(null)
@@ -622,6 +318,11 @@ export default function InputBar() {
 
   const [isDragging, setIsDragging] = useState(false)
   const [isSingleLine, setIsSingleLine] = useState(true)
+  const [promptExpanded, setPromptExpanded] = useState(false)
+  const [promptExpandedTop, setPromptExpandedTop] = useState(0)
+  const [promptCanExpand, setPromptCanExpand] = useState(false)
+  const [clearPromptHover, setClearPromptHover] = useState(false)
+  const [expandPromptHover, setExpandPromptHover] = useState(false)
   const [submitHover, setSubmitHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
   const [imageHintId, setImageHintId] = useState<string | null>(null)
@@ -642,13 +343,13 @@ export default function InputBar() {
   const imageDragOverIndexRef = useRef<number | null>(null)
   const imageDragPreviewRef = useRef<HTMLElement | null>(null)
   const suppressImageClickRef = useRef(false)
-  const replaceImageTargetRef = useRef<{ index: number; id: string } | null>(null)
   const isUserInputRef = useRef(false)
+  const isComposingRef = useRef(false)
   const imageHintLockedRef = useRef(false)
   const imageHintReleaseRef = useRef<(() => void) | null>(null)
   const [cursorPos, setCursorPos] = useState(0)
   const [menuLeft, setMenuLeft] = useState(0)
-  const maskConflictNoticeShownRef = useRef(false)
+  const showPromptExpand = promptExpanded || promptCanExpand
 
   const updateInputBarClearance = useCallback(() => {
     const bar = cardRef.current?.closest<HTMLElement>('[data-input-bar]')
@@ -681,6 +382,26 @@ export default function InputBar() {
       document.documentElement.style.removeProperty('--input-bar-clearance')
     }
   }, [updateInputBarClearance])
+
+  useLayoutEffect(() => {
+    if (!promptExpanded) return
+
+    const header = document.querySelector<HTMLElement>('header')
+    if (!header) return
+
+    const updateTop = () => setPromptExpandedTop(Math.max(0, header.getBoundingClientRect().bottom) + 8)
+    const observer = new ResizeObserver(updateTop)
+    observer.observe(header)
+    updateTop()
+    window.addEventListener('resize', updateTop)
+    header.addEventListener('transitionend', updateTop)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateTop)
+      header.removeEventListener('transitionend', updateTop)
+    }
+  }, [promptExpanded])
   const imageHintTimerRef = useRef<number | null>(null)
   const [outputCompressionInput, setOutputCompressionInput] = useState(
     params.output_compression == null ? '' : String(params.output_compression),
@@ -742,7 +463,7 @@ export default function InputBar() {
   const agentAutoImageCount = appMode === 'agent'
   const moderationDisabled = isFalProvider
   const transparentOutputAvailable = appMode === 'gallery'
-  const showTransparentOutputControl = transparentOutputAvailable && params.output_format === 'png'
+  const showTransparentOutputControl = transparentOutputAvailable && (params.output_format === 'png' || params.output_format === 'webp')
   const transparentOutputEnabled = transparentOutputAvailable && showTransparentOutputControl && params.transparent_output
   const compressionDisabled = params.output_format === 'png' || isFalProvider
   const outputImageLimit = getOutputImageLimitForSettings(effectiveSettings)
@@ -759,20 +480,20 @@ export default function InputBar() {
     ? DEFAULT_FAL_IMAGE_SIZE
     : params.size === 'auto'
     ? '1K / 2K 不固定'
-    : normalizeImageSize(params.size) || DEFAULT_PARAMS.size
+    : (activeProfile.codexCli ? normalizeCodexCliImageSize(params.size) : normalizeImageSize(params.size)) || DEFAULT_PARAMS.size
 
-  const qualityOptions = isFalProvider
-    ? [
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
-    : [
-        { label: 'auto', value: 'auto' },
-        { label: 'low', value: 'low' },
-        { label: 'medium', value: 'medium' },
-        { label: 'high', value: 'high' },
-      ]
+  const qualityOptions = [
+    ...(!isFalProvider ? [{ label: 'auto', value: 'auto' }] : []),
+    { label: 'low', value: 'low' },
+    { label: 'medium', value: 'medium' },
+    { label: 'high', value: 'high' },
+    ...(isGptImage25Model(getImageGenerationModel(activeProfile))
+      ? [
+          { label: 'xhigh', value: 'xhigh' },
+          { label: 'max', value: 'max' },
+        ]
+      : []),
+  ]
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const uploadImageTooltipText = atImageLimit ? `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加` : '上传图片'
   const transparentOutputHint = useHintTooltip()
@@ -781,7 +502,7 @@ export default function InputBar() {
   }, [transparentOutputHint.hide])
   const compressionHint = useHintTooltip({ enabled: () => compressionDisabled })
   const moderationHint = useHintTooltip({ enabled: () => moderationDisabled })
-  const sizeHint = useHintTooltip({ enabled: () => isFalTextToImage })
+  const sizeHint = useHintTooltip({ enabled: () => isFalTextToImage || activeProfile.codexCli })
   const qualityHint = useHintTooltip({ enabled: () => activeProfile.codexCli || isFalProvider })
   const nLimitHint = useHintTooltip({ autoHideMs: 2000 })
   const streamConcurrentHint = useHintTooltip({ enabled: () => streamConcurrentByN })
@@ -1113,101 +834,18 @@ export default function InputBar() {
   const handleFilesRef = useRef(handleFiles)
   handleFilesRef.current = handleFiles
 
-  const openReplaceReferenceFilePicker = useCallback((idx: number, imageId: string) => {
-    replaceImageTargetRef.current = { index: idx, id: imageId }
-    replaceFileInputRef.current?.click()
-  }, [])
-
-  const commitReferenceEditChoice = useCallback((choice: 'replace-reference' | 'add-mask', remember?: boolean) => {
-    if (remember) setSettings({ referenceImageEditAction: choice })
-  }, [setSettings])
-
-  const handleEditReferenceImage = useCallback((img: (typeof inputImages)[number], idx: number, isMaskTarget: boolean) => {
-    if (isMaskTarget) {
-      setMaskEditorImageId(img.id)
-      return
-    }
-
-    if (settings.referenceImageEditAction === 'replace-reference') {
-      openReplaceReferenceFilePicker(idx, img.id)
-      return
-    }
-
-    if (settings.referenceImageEditAction === 'add-mask') {
-      setMaskEditorImageId(img.id)
-      return
-    }
-
-    setConfirmDialog({
-      title: '编辑参考图',
-      message: '请选择这次要执行的操作。若不勾选下方的选项，则每次都询问；勾选后可在 **设置-习惯配置** 修改选择。',
-      checkbox: { label: '以后默认执行此选择' },
-      buttons: [
-        {
-          label: '替换参考图',
-          tone: 'secondary',
-          action: (remember) => {
-            commitReferenceEditChoice('replace-reference', remember)
-            openReplaceReferenceFilePicker(idx, img.id)
-          },
-        },
-        {
-          label: '添加遮罩',
-          tone: 'primary',
-          action: (remember) => {
-            commitReferenceEditChoice('add-mask', remember)
-            setMaskEditorImageId(img.id)
-          },
-        },
-      ],
-    })
-  }, [commitReferenceEditChoice, openReplaceReferenceFilePicker, setConfirmDialog, setMaskEditorImageId, settings.referenceImageEditAction])
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await handleFilesRef.current(e.target.files || [])
     e.target.value = ''
   }
 
-  const handleReplaceFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    const target = replaceImageTargetRef.current
-    replaceImageTargetRef.current = null
-    if (!file || !target) return
-
-    try {
-      const image = await createInputImageFromFile(file)
-      if (!image) {
-        showToast('请选择有效图片', 'error')
-        return
-      }
-
-      const currentImages = useStore.getState().inputImages
-      const currentIdx = currentImages.findIndex((item) => item.id === target.id)
-      const targetIdx = currentIdx >= 0 ? currentIdx : target.index
-      const previous = currentImages[targetIdx]
-      if (!previous) {
-        void deleteImageIfUnreferenced(image.id)
-        showToast('原参考图已不存在', 'error')
-        return
-      }
-      if (previous.id === image.id) {
-        showToast('参考图未变化', 'info')
-        return
-      }
-      if (currentImages.some((item, itemIdx) => itemIdx !== targetIdx && item.id === image.id)) {
-        showToast('这张图片已在参考图中', 'info')
-        return
-      }
-
-      replaceInputImage(targetIdx, image)
-      showToast('参考图已替换', 'success')
-    } catch (err) {
-      showToast(`参考图替换失败：${err instanceof Error ? err.message : String(err)}`, 'error')
-    }
-  }
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // 兼容某些输入法：用 Enter 确认候选字时会额外派发 Enter keydown，
+    // 组字期间忽略该事件，避免重复插入或误触发提交/换行。
+    if (e.key === 'Enter' && (e.nativeEvent.isComposing || isComposingRef.current || e.nativeEvent.keyCode === 229)) {
+      return
+    }
+
     if (showAtImageMenu) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -1380,8 +1018,11 @@ export default function InputBar() {
     const imagesHeight = imagesRef.current?.offsetHeight ?? 0
     const fixedOverhead = imagesHeight + 140
 
-    // 最大高度限制在页面 40% 减固定开销，不小于 80px
-    const maxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
+    // 展开时填满卡片的剩余空间，普通状态最多占页面的 40%。
+    const normalMaxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
+    const maxH = promptExpanded
+      ? Math.max(el.parentElement?.clientHeight ?? 0, 80)
+      : normalMaxH
 
     // 1. 清零高度以获取真实文本高度
     el.style.transition = 'none'
@@ -1398,6 +1039,7 @@ export default function InputBar() {
 
     // 判断是否为单行
     setIsSingleLine(desired <= minH)
+    setPromptCanExpand(desired > normalMaxH)
 
     // 2. 回设旧高度并重绘以准备触发动画
     el.style.height = prevHeightRef.current + 'px'
@@ -1409,7 +1051,7 @@ export default function InputBar() {
     el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
 
     prevHeightRef.current = targetH
-  }, [])
+  }, [promptExpanded])
 
   // 同步 prompt 至 contentEditable
   useEffect(() => {
@@ -1451,7 +1093,7 @@ export default function InputBar() {
 
   useEffect(() => {
     adjustTextareaHeight()
-  }, [prompt, inputImages, adjustTextareaHeight, isMobile, mobileCollapsed])
+  }, [prompt, inputImages, adjustTextareaHeight, isMobile, mobileCollapsed, promptExpanded])
 
   // 监听 selectionchange 更新光标位置（onSelect 在 contentEditable 下不可靠）
   useEffect(() => {
@@ -1620,7 +1262,6 @@ export default function InputBar() {
 
   const renderImageThumb = (img: (typeof inputImages)[number], idx: number) => {
     const isMaskTarget = maskDraft?.targetImageId === img.id
-    const canEdit = !maskTargetImage || isMaskTarget
     const imageHintText = isMaskTarget ? '遮罩图必须为第一张图' : ''
     const displaySrc = isMaskTarget && maskPreviewUrl ? maskPreviewUrl : img.dataUrl
     const isImageDragging = imageDragIndex === idx
@@ -1791,19 +1432,11 @@ export default function InputBar() {
           }`}
           onClick={() => {
             if (suppressImageClickRef.current) return
-            if (isMaskTarget) {
-              setMaskEditorImageId(img.id)
-              return
-            }
-            if (maskTargetImage && !maskConflictNoticeShownRef.current) {
-              maskConflictNoticeShownRef.current = true
-              showToast('只能有一张遮罩图', 'info')
-            }
             setLightboxImageId(img.id, inputImages.map((i) => i.id))
           }}
         >
           {displaySrc && (
-            <div className="h-full w-full overflow-hidden rounded-xl">
+            <div className="h-full w-full overflow-hidden">
               <img
                 src={displaySrc}
                 className="w-full h-full object-cover hover:opacity-90 transition-opacity pointer-events-none"
@@ -1850,20 +1483,20 @@ export default function InputBar() {
           <span className="absolute bottom-1 left-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/55 text-[9px] font-semibold text-white backdrop-blur-sm z-10 pointer-events-none">
             {idx + 1}
           </span>
-          {canEdit && (
-            <button 
-              className="absolute inset-0 w-full h-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer z-20 focus:outline-none border-none"
-              onClick={(e) => {
-                e.stopPropagation()
-                handleEditReferenceImage(img, idx, isMaskTarget)
-              }}
-              title={isMaskTarget ? "编辑遮罩" : "编辑"}
-            >
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </svg>
-            </button>
-          )}
+          <button
+            className="absolute inset-0 w-full h-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer z-20 focus:outline-none border-none"
+            onClick={(e) => {
+              e.stopPropagation()
+              setLightboxImageId(img.id, inputImages.map((i) => i.id))
+            }}
+            title="查看"
+            aria-label="查看参考图"
+          >
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6S2.25 12 2.25 12z" />
+              <circle cx="12" cy="12" r="2.75" strokeWidth={2} />
+            </svg>
+          </button>
         </div>
         {!isMaskTarget && (
           <span
@@ -1980,10 +1613,15 @@ export default function InputBar() {
           onSelect={(size) => setParams({ size })}
           onClose={() => setShowSizePicker(false)}
           allowAuto={!isFalTextToImage}
+          codexCli={activeProfile.codexCli}
         />
       )}
 
-      <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300">
+      <div
+        data-input-bar
+        className={`fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300${promptExpanded ? ' flex flex-col' : ''}`}
+        style={promptExpanded ? { top: `${promptExpandedTop}px`, transitionProperty: 'none' } : undefined}
+      >
         <InputBatchBars
           showFavoriteCollectionBatchBar={showFavoriteCollectionBatchBar}
           showTaskBatchBar={showTaskBatchBar}
@@ -2001,11 +1639,11 @@ export default function InputBar() {
           onDownloadSelected={handleDownloadSelected}
           onDeleteSelected={handleDeleteSelected}
         />
-        <div ref={cardRef} className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10">
+        <div ref={cardRef} className={`bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10${promptExpanded ? ' flex min-h-0 flex-1 flex-col' : ''}`}>
           {/* 移动端拖动条 */}
           <div
             ref={handleRef}
-            className="sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none"
+            className={promptExpanded ? 'hidden' : 'sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none'}
             onClick={() => {
               if (Date.now() < suppressHandleClickUntilRef.current) {
                 suppressHandleClickUntilRef.current = 0
@@ -2038,7 +1676,7 @@ export default function InputBar() {
           )}
 
           {/* 输入框 */}
-          <div className="relative grid">
+          <div className={`relative grid${promptExpanded ? ' min-h-0 flex-1' : ''}`}>
             {showAtImageMenu && (
               <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>
@@ -2090,6 +1728,12 @@ export default function InputBar() {
                 setAtImageMenuDismissed(false)
               }}
               onKeyDown={handleKeyDown}
+              onCompositionStart={() => {
+                isComposingRef.current = true
+              }}
+              onCompositionEnd={() => {
+                isComposingRef.current = false
+              }}
               onPaste={handlePromptPaste}
               onCopy={handlePromptCopy}
               onClick={(e) => {
@@ -2111,7 +1755,7 @@ export default function InputBar() {
                 syncMentionTagSelection(el)
               }}
               aria-label={promptPlaceholder}
-              className="col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30"
+              className={`col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30${promptExpanded ? ' !h-full !overflow-y-auto' : ''}`}
             />
             {prompt.length === 0 && (
               <div className={`prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500${
@@ -2121,16 +1765,48 @@ export default function InputBar() {
               </div>
             )}
             {prompt.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClearPrompt}
-                className={`absolute right-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.08] rounded-full p-1 transition-all duration-200 focus:outline-none z-10 flex items-center justify-center ${
-                  isSingleLine ? 'top-1/2 -translate-y-1/2' : 'top-3'
+              <div
+                className={`absolute z-10 ${
+                  isSingleLine ? 'right-3 top-1/2 -translate-y-1/2' : 'right-3 top-3'
                 }`}
-                title="清空文本"
+                onMouseEnter={() => setClearPromptHover(true)}
+                onMouseLeave={() => setClearPromptHover(false)}
               >
-                <CloseIcon className="w-3.5 h-3.5" />
-              </button>
+                <ButtonTooltip visible={clearPromptHover} text="清空文本" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClearPromptHover(false)
+                    handleClearPrompt()
+                  }}
+                  className="flex items-center justify-center rounded-full p-1 text-gray-400 transition-all duration-200 hover:bg-gray-100 hover:text-gray-600 focus:outline-none dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+                  aria-label="清空文本"
+                >
+                  <CloseIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            {showPromptExpand && (
+              <div
+                className="absolute bottom-2.5 right-2.5 z-10"
+                onMouseEnter={() => setExpandPromptHover(true)}
+                onMouseLeave={() => setExpandPromptHover(false)}
+              >
+                <ButtonTooltip visible={expandPromptHover} text={promptExpanded ? '恢复输入框' : '展开输入框'} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExpandPromptHover(false)
+                    setPromptExpanded((expanded) => !expanded)
+                    setMobileCollapsed(false)
+                  }}
+                  className="flex items-center justify-center rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+                  aria-label={promptExpanded ? '恢复输入框' : '展开输入框'}
+                  aria-pressed={promptExpanded}
+                >
+                  {promptExpanded ? <CollapseIcon className="h-4 w-4" /> : <ExpandIcon className="h-4 w-4" />}
+                </button>
+              </div>
             )}
           </div>
 
@@ -2313,13 +1989,6 @@ export default function InputBar() {
             capture="environment"
             className="hidden"
             onChange={handleFileUpload}
-          />
-          <input
-            ref={replaceFileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleReplaceFileUpload}
           />
         </div>
       </div>
