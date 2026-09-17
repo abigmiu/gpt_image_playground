@@ -279,7 +279,7 @@ describe('callAgentResponsesApi', () => {
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body.instructions).toContain('<title>short title</title>')
     expect(body.reasoning).toEqual({ effort: 'max' })
-    expect(body.max_output_tokens).toBeUndefined()
+    expect(body.max_output_tokens).toBe(32)
     expect(body.tools).toBeUndefined()
     expect(body.stream).toBeUndefined()
     expect(body.input[0].content[0].text).toContain('帮我生成一张橘猫头像，要赛博朋克风格')

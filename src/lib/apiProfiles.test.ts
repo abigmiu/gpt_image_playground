@@ -182,7 +182,7 @@ describe('mergeImportedSettings', () => {
       apiKey: 'imported-key',
       model: 'imported-model',
       timeout: 120,
-      apiMode: 'images',
+      apiMode: 'responses',
       codexCli: true,
       apiProxy: true,
     })
@@ -1537,7 +1537,7 @@ describe('custom providers', () => {
     expect(DEFAULT_SETTINGS.streamPartialImages).toBe(1)
     expect(DEFAULT_SETTINGS.profiles[0].streamImages).toBe(false)
     expect(DEFAULT_SETTINGS.profiles[0].streamPartialImages).toBe(1)
-    expect(normalizeSettings({ apiMode: 'responses' }).streamImages).toBe(false)
+    expect(normalizeSettings({ apiMode: 'responses' }).streamImages).toBe(true)
 
     const normalized = normalizeSettings({
       profiles: [
@@ -1625,7 +1625,7 @@ describe('custom providers', () => {
     expect(activeProfile.streamImages).toBe(false)
   })
 
-  it('forces gallery OpenAI profiles onto Images API even when only a responses profile is stored', () => {
+  it('keeps gallery OpenAI profiles on their stored API mode even when only a responses profile is stored', () => {
     const settings = normalizeSettings({
       profiles: [
         createDefaultOpenAIProfile({
@@ -1637,12 +1637,12 @@ describe('custom providers', () => {
     })
 
     const activeProfile = getActiveApiProfile(settings)
-    expect(activeProfile.apiMode).toBe('images')
-    expect(activeProfile.model).toBe(DEFAULT_IMAGES_MODEL)
-    expect(activeProfile.streamImages).toBe(false)
+    expect(activeProfile.apiMode).toBe('responses')
+    expect(activeProfile.model).toBe(DEFAULT_RESPONSES_MODEL)
+    expect(activeProfile.streamImages).toBe(true)
   })
 
-  it('keeps gallery active profile on an images profile when responses profiles also exist', () => {
+  it('keeps the explicitly selected active profile when responses profiles also exist', () => {
     const imageProfile = createDefaultOpenAIProfile({ id: 'image-profile', apiMode: 'images' })
     const responsesProfile = createDefaultOpenAIProfile({ id: 'responses-profile', apiMode: 'responses' })
     const settings = normalizeSettings({
@@ -1651,8 +1651,8 @@ describe('custom providers', () => {
       agentTextProfileId: responsesProfile.id,
     })
 
-    expect(settings.activeProfileId).toBe(imageProfile.id)
-    expect(getActiveApiProfile(settings).id).toBe(imageProfile.id)
+    expect(settings.activeProfileId).toBe(responsesProfile.id)
+    expect(getActiveApiProfile(settings).id).toBe(responsesProfile.id)
   })
 
   it('keeps non-OpenAI providers in Images API mode when switching providers', () => {

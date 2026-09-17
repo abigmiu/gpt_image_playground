@@ -669,7 +669,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
   const customProviders = normalizeCustomProviderDefinitions(record.customProviders)
   const customProviderIds = new Set(customProviders.map((provider) => provider.id))
   const nativeTransparentProviderIds = new Set(customProviders.filter(customProviderSupportsNativeTransparentBackground).map((provider) => provider.id))
-  const legacyApiMode: ApiMode = 'images'
+  const legacyApiMode: ApiMode = record.apiMode === 'responses' ? 'responses' : 'images'
   const legacyProfile = normalizeApiProfile({
     baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : DEFAULT_BASE_URL,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
@@ -695,10 +695,9 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     ...profile,
     isDefault: profile.id === defaultProfileId ? true : undefined,
   }))
-  const galleryProfiles = profiles.filter(isGalleryImageApiProfile)
-  const activeProfileId = typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId && isGalleryImageApiProfile(p))
+  const activeProfileId = typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId)
     ? record.activeProfileId
-    : (galleryProfiles[0]?.id ?? profiles[0].id)
+    : profiles[0].id
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
   const agentApiConfigMode = normalizeAgentApiConfigMode(record.agentApiConfigMode)
   const firstAgentTextProfile = profiles.find(isAgentTextApiProfile)
@@ -850,32 +849,22 @@ export function importCustomProviderDefinitionFromJson(jsonText: string, existin
 export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile {
   const record = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
   const normalized = normalizeSettings(settings)
-  const activeProfile = normalized.profiles.find((p) => p.id === normalized.activeProfileId) ?? normalized.profiles[0] ?? createDefaultOpenAIProfile()
-  const reusesActiveImageProfile = isGalleryImageApiProfile(activeProfile)
-  const profile = reusesActiveImageProfile
-    ? activeProfile
-    : normalized.profiles.find(isGalleryImageApiProfile) ?? {
-        ...activeProfile,
-        apiMode: 'images' as ApiMode,
-        model: DEFAULT_IMAGES_MODEL,
-        streamImages: false,
-        streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
-      }
-  const apiMode = 'images'
+  const profile = normalized.profiles.find((p) => p.id === normalized.activeProfileId) ?? normalized.profiles[0] ?? createDefaultOpenAIProfile()
+  const apiMode = profile.provider === 'openai' && (record.apiMode === 'images' || record.apiMode === 'responses')
+    ? record.apiMode
+    : profile.apiMode
 
   return {
     ...profile,
     baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : profile.baseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : profile.apiKey,
-    model: reusesActiveImageProfile && typeof record.model === 'string' && record.model.trim() ? record.model : profile.model,
+    model: typeof record.model === 'string' && record.model.trim() ? record.model : profile.model,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : profile.timeout,
     apiMode,
-    codexCli: reusesActiveImageProfile && typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,
+    codexCli: typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : profile.apiProxy,
-    streamImages: reusesActiveImageProfile && profile.provider === 'openai' && typeof record.streamImages === 'boolean' ? record.streamImages : profile.streamImages,
-    streamPartialImages: reusesActiveImageProfile
-      ? normalizeStreamPartialImages(record.streamPartialImages, profile.streamPartialImages)
-      : (profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES),
+    streamImages: profile.provider === 'openai' && typeof record.streamImages === 'boolean' ? record.streamImages : profile.streamImages,
+    streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, profile.streamPartialImages),
   }
 }
 

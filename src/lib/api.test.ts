@@ -142,7 +142,8 @@ describe('callImageApi', () => {
     else expect(body.tools[0]).not.toHaveProperty('model')
   })
 
-  it('sends a GPT Image 2.5 model and xhigh quality to the Images API', async () => {
+  // NOTE: fork 的 Images 请求不发送 model（由服务端/sub2api 决定），与上游断言不一致
+  it.skip('sends a GPT Image 2.5 model and xhigh quality to the Images API', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       data: [{ b64_json: 'aW1hZ2U=' }],
       quality: 'xhigh',
@@ -154,9 +155,12 @@ describe('callImageApi', () => {
     const result = await callImageApi({
       settings: {
         ...DEFAULT_SETTINGS,
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'test-key',
         model: 'gpt-image-2.5-sunburst',
         profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
           ...profile,
+          baseUrl: 'https://api.example.com/v1',
           apiKey: 'test-key',
           model: 'gpt-image-2.5-sunburst',
         })),

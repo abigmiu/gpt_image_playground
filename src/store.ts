@@ -274,7 +274,7 @@ export function getPersistedState(state: AppState) {
       ? { agentConversations: getPersistableAgentConversations(state.agentConversations) }
       : {}),
     activeAgentConversationId: state.activeAgentConversationId,
-    agentInputDrafts: getPersistableAgentInputDrafts(state),
+    agentInputDrafts: settings.persistInputOnRestart ? getPersistableAgentInputDrafts(state) : {},
     agentSidebarCollapsed: state.agentSidebarCollapsed,
     agentAssetTab: state.agentAssetTab,
     agentAssetPanelCollapsed: state.agentAssetPanelCollapsed,
